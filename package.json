@@ -22,6 +22,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "format": "prettier --write .",
     "test": "playwright test",
+    "hub:host": "bun hub-host/run.ts",
+    "test:hub-host": "bun test hub-host/server.test.ts",
     "icons": "node scripts/generate-icons.mjs",
     "demo": "bun scripts/make-demo.ts",
     "guides:screenshots": "playwright test -c playwright.guides.config.ts"

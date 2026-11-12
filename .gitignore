@@ -22,6 +22,7 @@ playwright-report/
 test-results/
 tsconfig.tsbuildinfo
 .scratch/
+.hub-data/
 # Private teacher feedback from the CRM; never commit (public repo)
 docs/teacher-feedback.md
 .svelte-kit/
