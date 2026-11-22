@@ -1,0 +1,31 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... oding]::UTF8; bun test src/lib/peer.test.ts -t reconnect 2>&1 | Out-F ...
++                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+src\lib\peer.test.ts:
+162 |     peer.emit("close");
+163 |     expect(
+164 |       timeouts.some(
+165 |         (entry) => entry.id === lastTimer.id && entry.ms === reconnectBackoff.startMs,
+166 |       ),
+167 |     ).toBe(false);
+            ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\src\lib\peer.test.ts:167:7)
+(fail) peer connection helpers (fictional doubles, fake timers) > reconnect backs off exponentially and resets after a 
+successful open [2.31ms]
+
+ 0 pass
+ 1 filtered out
+ 1 fail
+ 5 expect() calls
+Ran 1 test across 1 file. [29.00ms]

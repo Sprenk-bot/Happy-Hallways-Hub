@@ -1,11 +1,22 @@
-import { defaultAllowance, passCounts, skipsAllowance, windowStart } from './allowance';
-import { defaultDestinations, knownIcon } from './destinations';
-import { countsTowardClassLimit } from './limits';
-import type { IconName } from './icons';
-import { endUnseen, mergeInto, newId, now } from './passes';
-import { displayName, type ImportPlan, type RosterCandidate } from './roster';
-import { blankSchedule, clockOf, noPassAt, scheduledClassAt, withRulesOnPeriods } from './schedule';
-import { arrivalStatus, periodFor, today } from './attendance';
+import {
+  defaultAllowance,
+  passCounts,
+  skipsAllowance,
+  windowStart,
+} from "./allowance";
+import { defaultDestinations, knownIcon } from "./destinations";
+import { countsTowardClassLimit } from "./limits";
+import type { IconName } from "./icons";
+import { endUnseen, mergeInto, newId, now } from "./passes";
+import { displayName, type ImportPlan, type RosterCandidate } from "./roster";
+import {
+  blankSchedule,
+  clockOf,
+  noPassAt,
+  scheduledClassAt,
+  withRulesOnPeriods,
+} from "./schedule";
+import { arrivalStatus, periodFor, today } from "./attendance";
 import type {
   ClassVisibility,
   Member,
@@ -18,6 +29,9 @@ import type {
   ClassStudent,
   Destination,
   DoorSetup,
+  HubVisit,
+  HubVisitCancellationReason,
+  HubKioskSoundSettings,
   LineSpot,
   OfflineArrival,
   OfflineReturn,
@@ -26,10 +40,11 @@ import type {
   PassRequest,
   Room,
   Schedule,
+  StudentCategory,
   Student,
-} from './types';
-import { newsIds, seenBefore } from './popups';
-import { randomPin } from './pins';
+} from "./types";
+import { newsIds, seenBefore } from "./popups";
+import { randomPin } from "./pins";
 
 /**
  * The teacher's whole Account, kept in this browser's local storage. There is
@@ -41,40 +56,84 @@ import { randomPin } from './pins';
  * never reads data it can't understand, or saves an older shape over it. The
  * old key is left untouched, as it was, as a way back. See docs/adr/0005.
  */
-const storageKey = 'hallway.account.v2';
-const legacyKey = 'hallway.account';
+const storageKey = "hallway.account.v2";
+const legacyKey = "hallway.account";
 /** The shape of the saved Account, so a later version can tell older or newer data. */
-export const accountVersion = 2;
+export const accountVersion = 4;
 /** What this version's teacher's computer understands from a kiosk: 2 is a kiosk that asks it for everything (docs/adr/0014). */
 export const doorProtocol = 2;
+const hubHostEdition =
+  typeof document !== "undefined" &&
+  document
+    .querySelector('meta[name="happy-hallways-hub-host"]')
+    ?.getAttribute("content") === "true";
+
+const initialStudentCategories: StudentCategory[] = [
+  { id: "year-7", name: "Year 7", color: "blue" },
+  { id: "year-8", name: "Year 8", color: "teal" },
+  { id: "year-9", name: "Year 9", color: "purple" },
+  { id: "year-10", name: "Year 10", color: "orange" },
+  { id: "year-11", name: "Year 11", color: "green" },
+  { id: "year-12", name: "Year 12", color: "pink" },
+];
+
+function defaultStudentCategories() {
+  return initialStudentCategories.map((category) => ({ ...category }));
+}
 
 /**
  * Attendance is one mark per student, class and day, so a year of it is large.
  * It's saved compactly: by class, then day, then student, as
  * [status, minutes after midnight they arrived, minutes tardy, flags, name].
  */
-type StoredMark = [status: 'p' | 't' | 'a', arrived?: number | null, tardy?: number | null, flags?: number, name?: string];
+type StoredMark = [
+  status: "p" | "t" | "a",
+  arrived?: number | null,
+  tardy?: number | null,
+  flags?: number,
+  name?: string,
+];
 type AttendanceLog = Record<string, Record<string, Record<string, StoredMark>>>;
-const statusCode = { present: 'p', tardy: 't', absent: 'a' } as const;
-const statusOf = { p: 'present', t: 'tardy', a: 'absent' } as const;
+const statusCode = { present: "p", tardy: "t", absent: "a" } as const;
+const statusOf = { p: "present", t: "tardy", a: "absent" } as const;
 
 function packAttendance(marks: AttendanceMark[]): AttendanceLog {
   const log: AttendanceLog = {};
   for (const mark of marks) {
     const arrived = mark.arrivedAt ? new Date(mark.arrivedAt) : null;
-    const flags = (mark.excused ? 1 : 0) | (mark.goneForDay ? 2 : 0) | (mark.corrected ? 4 : 0);
-    const stored: StoredMark = [statusCode[mark.status], arrived ? arrived.getHours() * 60 + arrived.getMinutes() + arrived.getSeconds() / 60 : null, mark.tardyMinutes ?? null, flags, mark.studentName];
+    const flags =
+      (mark.excused ? 1 : 0) |
+      (mark.goneForDay ? 2 : 0) |
+      (mark.corrected ? 4 : 0);
+    const stored: StoredMark = [
+      statusCode[mark.status],
+      arrived
+        ? arrived.getHours() * 60 +
+          arrived.getMinutes() +
+          arrived.getSeconds() / 60
+        : null,
+      mark.tardyMinutes ?? null,
+      flags,
+      mark.studentName,
+    ];
     ((log[mark.classId] ??= {})[mark.day] ??= {})[mark.studentId] = stored;
   }
   return log;
 }
 
-function unpackAttendance(log: AttendanceLog, setAside: unknown[] = []): AttendanceMark[] {
+function unpackAttendance(
+  log: AttendanceLog,
+  setAside: unknown[] = [],
+): AttendanceMark[] {
   const marks: AttendanceMark[] = [];
   for (const [classId, days] of Object.entries(log)) {
     for (const [day, students] of Object.entries(days)) {
       // A day that isn't a date can't be a mark; it's set aside, not allowed to make the whole Account unreadable.
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !students || typeof students !== 'object') {
+      if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
+        !students ||
+        typeof students !== "object"
+      ) {
         setAside.push({ classId, day, students });
         continue;
       }
@@ -83,10 +142,20 @@ function unpackAttendance(log: AttendanceLog, setAside: unknown[] = []): Attenda
           setAside.push({ classId, day, students: { [studentId]: stored } });
           continue;
         }
-        const [status, arrived, tardy, flags = 0, name = ''] = stored as StoredMark;
-        const [year, month, date] = day.split('-').map(Number);
+        const [status, arrived, tardy, flags = 0, name = ""] =
+          stored as StoredMark;
+        const [year, month, date] = day.split("-").map(Number);
         const arrivedAt =
-          typeof arrived === 'number' ? new Date(year, month - 1, date, 0, 0, Math.round(arrived * 60)).toISOString() : undefined;
+          typeof arrived === "number"
+            ? new Date(
+                year,
+                month - 1,
+                date,
+                0,
+                0,
+                Math.round(arrived * 60),
+              ).toISOString()
+            : undefined;
         const mark: AttendanceMark = {
           id: `${classId}|${day}|${studentId}`,
           classId,
@@ -97,7 +166,7 @@ function unpackAttendance(log: AttendanceLog, setAside: unknown[] = []): Attenda
           updatedAt: arrivedAt ?? new Date(year, month - 1, date).toISOString(),
         };
         if (arrivedAt) mark.arrivedAt = arrivedAt;
-        if (typeof tardy === 'number') mark.tardyMinutes = tardy;
+        if (typeof tardy === "number") mark.tardyMinutes = tardy;
         if (flags & 1) mark.excused = true;
         if (flags & 2) mark.goneForDay = true;
         if (flags & 4) mark.corrected = true;
@@ -111,7 +180,11 @@ function unpackAttendance(log: AttendanceLog, setAside: unknown[] = []): Attenda
 /** The Account as saved: attendance compact, everything else as it is. */
 function storedText(value: Account) {
   const { attendance, ...rest } = $state.snapshot(value) as Account;
-  return JSON.stringify({ ...rest, attendance: [], attendanceLog: packAttendance(attendance) });
+  return JSON.stringify({
+    ...rest,
+    attendance: [],
+    attendanceLog: packAttendance(attendance),
+  });
 }
 
 function blankAccount(): Account {
@@ -119,12 +192,20 @@ function blankAccount(): Account {
     version: accountVersion,
     laptopPeerId: `hallway-${newId()}`,
     roster: [],
+    studentCategories: defaultStudentCategories(),
     classes: [],
     destinations: defaultDestinations(newId),
     passes: [],
+    hubVisits: [],
+    hubPromptOverrides: [],
+    hubKioskSoundSettings: {
+      muted: false,
+      volume: 70,
+      commonChime: 'soft',
+    },
     lineEnabled: false,
     line: [],
-    limitMode: 'destination',
+    limitMode: "destination",
     classLimit: 1,
     passAllowance: defaultAllowance(),
     schedules: [],
@@ -134,7 +215,7 @@ function blankAccount(): Account {
     deniedRequests: [],
     // Nothing changed under a brand-new teacher, so there is no news to show them.
     seenPopups: Object.fromEntries(newsIds().map((id) => [id, now()])),
-    pin: '',
+    pin: "",
     kiosk: null,
     activeClass: null,
     replacedKiosks: [],
@@ -163,22 +244,39 @@ function blankAccount(): Account {
  *   period now has its own. See EdgeRule.
  */
 /** How a student was kept before the Roster: one entry per class. See docs/adr/0015. */
-type OlderStudent = { id: string; firstName: string; lastPrefix: string; status: 'current' | 'former'; exempt?: boolean; alwaysGo?: boolean; pin?: string };
+type OlderStudent = {
+  id: string;
+  firstName: string;
+  lastPrefix: string;
+  status: "current" | "former";
+  exempt?: boolean;
+  alwaysGo?: boolean;
+  pin?: string;
+};
 
-type SavedAccount = Omit<Account, 'destinations' | 'classes' | 'schedules' | 'seenPopups' | 'limitMode' | 'classLimit' | 'roster'> & {
+type SavedAccount = Omit<
+  Account,
+  | "destinations"
+  | "classes"
+  | "schedules"
+  | "seenPopups"
+  | "limitMode"
+  | "classLimit"
+  | "roster"
+> & {
   roster?: Student[];
-  limitMode?: Account['limitMode'];
+  limitMode?: Account["limitMode"];
   classLimit?: number;
   schedules?: Schedule[];
-  destinations?: (Omit<Destination, 'limit'> & { limit?: number | null })[];
+  destinations?: (Omit<Destination, "limit"> & { limit?: number | null })[];
   passLimit?: number;
   permissions?: unknown[];
   relayedAnswers?: unknown[];
   extraPassGifts?: unknown[];
   seenUpdate?: string;
   seenPopups?: Record<string, string>;
-  classes: (Omit<Class, 'members'> & {
-    members?: Class['members'];
+  classes: (Omit<Class, "members"> & {
+    members?: Class["members"];
     /** PINs used to be turned on class by class. */
     studentPins?: boolean;
     students?: OlderStudent[];
@@ -190,12 +288,23 @@ type SavedAccount = Omit<Account, 'destinations' | 'classes' | 'schedules' | 'se
 
 function upgrade(saved: SavedAccount): Account {
   const oldLimit = saved.passLimit ?? saved.classes[0]?.limit ?? 1;
+  saved.studentCategories ??= defaultStudentCategories();
+  saved.hubVisits ??= [];
+  saved.hubPromptOverrides ??= [];
+  saved.hubKioskSoundSettings ??= {
+    muted: false,
+    volume: 70,
+    commonChime: "soft",
+  };
   if (!saved.destinations) {
-    const old = saved.classes.find((cls) => cls.destinations?.length)?.destinations;
+    const old = saved.classes.find(
+      (cls) => cls.destinations?.length,
+    )?.destinations;
     const defaults = defaultDestinations(newId);
     saved.destinations = old
       ? old.map((each): Destination => ({
-          ...(defaults.find((preset) => preset.label === each.label) ?? defaults[defaults.length - 1]),
+          ...(defaults.find((preset) => preset.label === each.label) ??
+            defaults[defaults.length - 1]),
           id: newId(),
           label: each.label,
           minutes: each.minutes || null,
@@ -208,7 +317,7 @@ function upgrade(saved: SavedAccount): Account {
     if (destination.limit === undefined) destination.limit = oldLimit;
   }
   delete saved.passLimit;
-  saved.limitMode ??= 'destination';
+  saved.limitMode ??= "destination";
   saved.classLimit ??= 1;
   saved.passAllowance ??= defaultAllowance();
   delete saved.permissions;
@@ -219,17 +328,23 @@ function upgrade(saved: SavedAccount): Account {
   saved.seenPopups ??= seenBefore(saved.seenUpdate, now());
   delete saved.seenUpdate;
   if (!saved.schedules) {
-    const schedule = blankSchedule(newId(), 'My Schedule');
+    const schedule = blankSchedule(newId(), "My Schedule");
     const copied = new Set<string>();
     for (const time of saved.classes.flatMap((cls) => cls.noPassTimes ?? [])) {
       if (copied.has(time.start + time.end)) continue;
       copied.add(time.start + time.end);
-      schedule.noPassTimes.push({ id: newId(), start: time.start, end: time.end });
+      schedule.noPassTimes.push({
+        id: newId(),
+        start: time.start,
+        end: time.end,
+      });
     }
     saved.schedules = schedule.noPassTimes.length ? [schedule] : [];
   }
   saved.schedules = saved.schedules.map(withRulesOnPeriods);
-  if (!saved.schedules.some((schedule) => schedule.id === saved.currentScheduleId)) {
+  if (
+    !saved.schedules.some((schedule) => schedule.id === saved.currentScheduleId)
+  ) {
     saved.currentScheduleId = saved.schedules[0]?.id ?? null;
   }
   saved.manualNoPass ??= null;
@@ -242,11 +357,19 @@ function upgrade(saved: SavedAccount): Account {
   }
   for (const cls of saved.classes) delete cls.attendance;
   // The Student link used to be one lasting link; it's now a Room per class period (docs/adr/0019).
-  const link = saved.studentLink as { open: boolean; room?: Room | null } | null;
-  saved.studentLink = link ? { open: link.open, room: link.room ?? null } : null;
+  const link = saved.studentLink as {
+    open: boolean;
+    room?: Room | null;
+  } | null;
+  saved.studentLink = link
+    ? { open: link.open, room: link.room ?? null }
+    : null;
   // Each class keeps its code now (docs/adr/0023). The class on now keeps the one its students already have.
-  const roomClass = saved.classes.find((cls) => cls.id === saved.studentLink?.room?.classId);
-  if (roomClass && !roomClass.code) roomClass.code = saved.studentLink!.room!.code;
+  const roomClass = saved.classes.find(
+    (cls) => cls.id === saved.studentLink?.room?.classId,
+  );
+  if (roomClass && !roomClass.code)
+    roomClass.code = saved.studentLink!.room!.code;
   for (const cls of saved.classes) cls.code ??= newRoomCode(saved.classes);
   delete (saved as { claimsEndWithClass?: boolean }).claimsEndWithClass;
   for (const cls of saved.classes) {
@@ -259,14 +382,16 @@ function upgrade(saved: SavedAccount): Account {
   if (!saved.roster) {
     const roster: Student[] = [];
     for (const cls of saved.classes) {
-      cls.members = (cls.students ?? []).map(({ id, firstName, lastPrefix, status, exempt, alwaysGo, pin }) => {
-        const student: Student = { id, firstName };
-        if (exempt) student.exempt = true;
-        if (alwaysGo) student.alwaysGo = true;
-        if (pin) student.pin = pin;
-        roster.push(student);
-        return { studentId: id, lastPrefix, status };
-      });
+      cls.members = (cls.students ?? []).map(
+        ({ id, firstName, lastPrefix, status, exempt, alwaysGo, pin }) => {
+          const student: Student = { id, firstName };
+          if (exempt) student.exempt = true;
+          if (alwaysGo) student.alwaysGo = true;
+          if (pin) student.pin = pin;
+          roster.push(student);
+          return { studentId: id, lastPrefix, status };
+        },
+      );
     }
     saved.roster = roster;
     // A brand-new teacher, or one whose classes held nobody, has nothing to merge.
@@ -297,12 +422,13 @@ const fromOlderVersions = {
  * the teacher sees a screen to download it and write to support, and a copy is
  * kept under its own key in case anything goes wrong after.
  */
-export const unreadable = $state({ raw: null as string | null, error: '' });
+export const unreadable = $state({ raw: null as string | null, error: "" });
 
 /** A short fingerprint of saved text, to notice when a tab on the older version has changed the older key. */
 function fingerprint(text: string) {
   let hash = 5381;
-  for (let index = 0; index < text.length; index++) hash = ((hash << 5) + hash + text.charCodeAt(index)) | 0;
+  for (let index = 0; index < text.length; index++)
+    hash = ((hash << 5) + hash + text.charCodeAt(index)) | 0;
   return `${text.length}:${(hash >>> 0).toString(36)}`;
 }
 
@@ -320,7 +446,11 @@ function keepUnreadableCopy(text: string) {
   try {
     for (let index = 0; index < localStorage.length; index++) {
       const key = localStorage.key(index)!;
-      if (key.startsWith('hallway.account.unreadable.') && localStorage.getItem(key) === text) return;
+      if (
+        key.startsWith("hallway.account.unreadable.") &&
+        localStorage.getItem(key) === text
+      )
+        return;
     }
     localStorage.setItem(`hallway.account.unreadable.${Date.now()}`, text);
   } catch {
@@ -331,18 +461,37 @@ function keepUnreadableCopy(text: string) {
 /** Reads one saved Account. Throws when it can't; returns null when it holds nothing (`{}`, `null`, `[]`). */
 function readAccount(text: string): Account | null {
   const parsed = JSON.parse(text);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).length === 0) return null;
-  if (!Array.isArray(parsed.classes)) throw new Error('The saved data has no classes.');
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    Array.isArray(parsed) ||
+    Object.keys(parsed).length === 0
+  )
+    return null;
+  if (!Array.isArray(parsed.classes))
+    throw new Error("The saved data has no classes.");
   if (parsed.attendanceLog) {
     const setAside: unknown[] = [];
-    parsed.attendance = [...(parsed.attendance ?? []), ...unpackAttendance(parsed.attendanceLog, setAside)];
+    parsed.attendance = [
+      ...(parsed.attendance ?? []),
+      ...unpackAttendance(parsed.attendanceLog, setAside),
+    ];
     // Kept as it was, so nothing is thrown away; it's just not shown.
-    if (setAside.length) parsed.unreadableAttendance = [...(parsed.unreadableAttendance ?? []), ...setAside];
+    if (setAside.length)
+      parsed.unreadableAttendance = [
+        ...(parsed.unreadableAttendance ?? []),
+        ...setAside,
+      ];
     delete parsed.attendanceLog;
   }
   // Marks saved before they were kept compactly had ids of their own; they take the same kind of id now.
-  for (const mark of parsed.attendance ?? []) mark.id = `${mark.classId}|${mark.day}|${mark.studentId}`;
-  const account = upgrade({ ...blankAccount(), ...fromOlderVersions, ...parsed });
+  for (const mark of parsed.attendance ?? [])
+    mark.id = `${mark.classId}|${mark.day}|${mark.studentId}`;
+  const account = upgrade({
+    ...blankAccount(),
+    ...fromOlderVersions,
+    ...parsed,
+  });
   account.version = accountVersion;
   return account;
 }
@@ -373,8 +522,7 @@ function load(): Account {
       if (key === legacyKey) {
         read.legacySeen = fingerprint(text);
         read.legacyRequestIds = read.requests.map((request) => request.id);
-      }
-      else read.legacySeen ??= legacy ? fingerprint(legacy) : undefined;
+      } else read.legacySeen ??= legacy ? fingerprint(legacy) : undefined;
       return read;
     } catch (error) {
       unreadable.raw = text;
@@ -387,6 +535,31 @@ function load(): Account {
 }
 
 export const account: Account = $state(load());
+
+export function isHubHostEdition() {
+  return hubHostEdition;
+}
+
+/** The complete local account encoding, with compact attendance for the Host API. */
+export function accountSnapshot(): Account {
+  return JSON.parse(storedText(account)) as Account;
+}
+
+/** Replaces the in-memory account from an acknowledged Host snapshot without writing a browser copy. */
+export function loadHubSnapshot(snapshot: unknown) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw new Error("The Hub Host returned an invalid account snapshot.");
+  }
+  const loaded = readAccount(JSON.stringify(snapshot));
+  if (!loaded) throw new Error("The Hub Host account is empty or unreadable.");
+  unreadable.raw = null;
+  unreadable.error = "";
+  for (const key of Object.keys(account)) {
+    if (!(key in loaded)) delete account[key as keyof Account];
+  }
+  Object.assign(account, loaded);
+  for (const listener of afterReload) listener();
+}
 
 /** Called after every save, so a connected kiosk, and students watching the Student link, hear about the change. */
 const afterSave: (() => void)[] = [];
@@ -409,7 +582,12 @@ function ownCopyIsSafe() {
 }
 
 function isQuotaError(error: unknown) {
-  return error instanceof DOMException && (error.name === 'QuotaExceededError' || error.code === 22 || error.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+  return (
+    error instanceof DOMException &&
+    (error.name === "QuotaExceededError" ||
+      error.code === 22 ||
+      error.name === "NS_ERROR_DOM_QUOTA_REACHED")
+  );
 }
 
 /**
@@ -420,11 +598,17 @@ function isQuotaError(error: unknown) {
  */
 function write() {
   if (unreadable.raw !== null) return false;
+  // Hub Host pages keep staff data in memory and submit it to the durable Host store.
+  if (hubHostEdition) return true;
   const text = storedText(account);
   // Copies kept for support go first. The older version's copy goes only once this version's own copy is
   // safely saved and readable: before that, it's the only copy there is.
   const spare = () => [
-    ...Object.keys(localStorage).filter((key) => key.startsWith('hallway.account.unreadable.') || key.startsWith('hallway.door.unreadable.')),
+    ...Object.keys(localStorage).filter(
+      (key) =>
+        key.startsWith("hallway.account.unreadable.") ||
+        key.startsWith("hallway.door.unreadable."),
+    ),
     ...(ownCopyIsSafe() ? [legacyKey] : []),
   ];
   for (let attempt = 0; ; attempt++) {
@@ -458,8 +642,8 @@ export function onReload(listener: () => void) {
   afterReload.push(listener);
 }
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (event) => {
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
     if (event.newValue === null || unreadable.raw !== null) return;
     // A tab still on the older version recorded something: take in its passes, without losing anything here.
     if (event.key === legacyKey && localStorage.getItem(storageKey) !== null) {
@@ -467,10 +651,13 @@ if (typeof window !== 'undefined') {
       return;
     }
     // Before this version has saved, the older key is still the record.
-    const watched = event.key === storageKey || (event.key === legacyKey && localStorage.getItem(storageKey) === null);
+    const watched =
+      event.key === storageKey ||
+      (event.key === legacyKey && localStorage.getItem(storageKey) === null);
     if (!watched) return;
     const fresh = load();
-    for (const key of Object.keys(account)) if (!(key in fresh)) delete account[key as keyof Account];
+    for (const key of Object.keys(account))
+      if (!(key in fresh)) delete account[key as keyof Account];
     Object.assign(account, fresh);
     for (const listener of afterReload) listener();
   });
@@ -505,16 +692,25 @@ function foldLegacy() {
     foldPasses(older.passes.filter((pass) => classIds.has(pass.classId)));
     // Only Requests new in the older tab since last time: one answered here doesn't come back.
     const seenBefore = new Set(account.legacyRequestIds ?? []);
-    const known = new Set([...account.requests, ...account.deniedRequests].map((request) => request.id));
+    const known = new Set(
+      [...account.requests, ...account.deniedRequests].map(
+        (request) => request.id,
+      ),
+    );
     for (const request of older.requests) {
-      if (!known.has(request.id) && !seenBefore.has(request.id) && classIds.has(request.classId)) account.requests.push(request);
+      if (
+        !known.has(request.id) &&
+        !seenBefore.has(request.id) &&
+        classIds.has(request.classId)
+      )
+        account.requests.push(request);
     }
     account.legacyRequestIds = older.requests.map((request) => request.id);
   }
   save();
 }
 
-if (typeof window !== 'undefined') queueMicrotask(foldLegacy);
+if (typeof window !== "undefined") queueMicrotask(foldLegacy);
 
 /**
  * A teacher who updated in the middle of a class, with student devices on,
@@ -522,12 +718,18 @@ if (typeof window !== 'undefined') queueMicrotask(foldLegacy);
  */
 function startMissingRoom() {
   const link = account.studentLink;
-  if (!link?.open || link.room || !account.activeClass?.id || unreadable.raw !== null) return;
+  if (
+    !link?.open ||
+    link.room ||
+    !account.activeClass?.id ||
+    unreadable.raw !== null
+  )
+    return;
   refreshRoom();
   save();
 }
 
-if (typeof window !== 'undefined') queueMicrotask(startMissingRoom);
+if (typeof window !== "undefined") queueMicrotask(startMissingRoom);
 
 export function findClass(id: string | null | undefined) {
   return account.classes.find((cls) => cls.id === id);
@@ -538,7 +740,9 @@ export function classPasses(classId: string) {
 }
 
 export function openPasses(classId?: string) {
-  return account.passes.filter((pass) => !pass.inAt && (!classId || pass.classId === classId));
+  return account.passes.filter(
+    (pass) => !pass.inAt && (!classId || pass.classId === classId),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -554,13 +758,14 @@ export function createClass(name: string) {
     createdAt: now(),
   };
   account.classes.push(cls);
-  if (!account.activeClass) account.activeClass = { id: cls.id, changedAt: now() };
+  if (!account.activeClass)
+    account.activeClass = { id: cls.id, changedAt: now() };
   refreshRoom();
   save();
   return cls.id;
 }
 
-export function updateClass(id: string, changes: Partial<Pick<Class, 'name'>>) {
+export function updateClass(id: string, changes: Partial<Pick<Class, "name">>) {
   const cls = findClass(id);
   if (!cls) return;
   Object.assign(cls, changes);
@@ -597,7 +802,11 @@ export function deleteClass(id: string) {
     }
   }
   if (account.activeClass?.onSchedule) {
-    account.activeClass = { id: scheduledClassAt(currentSchedule()), changedAt: now(), onSchedule: true };
+    account.activeClass = {
+      id: scheduledClassAt(currentSchedule()),
+      changedAt: now(),
+      onSchedule: true,
+    };
   } else if (account.activeClass?.id === id) {
     const next = account.classes[0];
     account.activeClass = next ? { id: next.id, changedAt: now() } : null;
@@ -612,7 +821,11 @@ export function deleteClass(id: string) {
 
 /** The schedule the teacher last picked, if they have any. */
 export function currentSchedule(): Schedule | undefined {
-  return account.schedules.find((schedule) => schedule.id === account.currentScheduleId) ?? account.schedules[0];
+  return (
+    account.schedules.find(
+      (schedule) => schedule.id === account.currentScheduleId,
+    ) ?? account.schedules[0]
+  );
 }
 
 /** The schedule the kiosk is following right now, if any. */
@@ -659,8 +872,11 @@ export function saveSchedule(schedule: Schedule) {
 /** Deleting the schedule the kiosk follows takes the kiosk off schedule, on the class it has now. */
 export function deleteSchedule(id: string) {
   if (liveSchedule()?.id === id) stopFollowingSchedule();
-  account.schedules = account.schedules.filter((schedule) => schedule.id !== id);
-  if (account.currentScheduleId === id) account.currentScheduleId = account.schedules[0]?.id ?? null;
+  account.schedules = account.schedules.filter(
+    (schedule) => schedule.id !== id,
+  );
+  if (account.currentScheduleId === id)
+    account.currentScheduleId = account.schedules[0]?.id ?? null;
   save();
 }
 
@@ -683,7 +899,11 @@ export function classScheduledNow(scheduleId = account.currentScheduleId) {
 export function useSchedule(id: string) {
   if (!findSchedule(id)) return;
   account.currentScheduleId = id;
-  setActiveClass({ id: classScheduledNow(id), changedAt: now(), onSchedule: true });
+  setActiveClass({
+    id: classScheduledNow(id),
+    changedAt: now(),
+    onSchedule: true,
+  });
 }
 
 /**
@@ -707,7 +927,10 @@ export function keepToSchedule() {
 
 /** Stops passes by hand, any time, until the teacher opens them again, whatever class comes on. */
 export function startNoPassTime() {
-  account.manualNoPass = { classId: account.activeClass?.id ?? null, startedAt: now() };
+  account.manualNoPass = {
+    classId: account.activeClass?.id ?? null,
+    startedAt: now(),
+  };
   save();
 }
 
@@ -719,37 +942,37 @@ export function endNoPassTime() {
 /** The class on the kiosk, as the teacher should read it. */
 export function activeClassLabel() {
   const active = account.activeClass;
-  if (active?.onSchedule && !active.id) return 'No class right now';
-  return findClass(active?.id)?.name ?? 'No class chosen';
+  if (active?.onSchedule && !active.id) return "No class right now";
+  return findClass(active?.id)?.name ?? "No class chosen";
 }
 
 /**
  * Whether students may leave right now, in a word: passes are open, it's a
  * No-Pass Time, it's between periods, or no class is on the kiosk.
  */
-export type PassStatus = 'open' | 'no-pass' | 'between' | 'no-class';
+export type PassStatus = "open" | "no-pass" | "between" | "no-class";
 
 export function passStatus(at = Date.now()): PassStatus {
   const active = account.activeClass;
   // Stopped by hand, it's "no passes" whatever else is going on: that's what the teacher chose.
-  if (account.manualNoPass) return 'no-pass';
-  if (!active?.id) return active?.onSchedule ? 'between' : 'no-class';
-  return noPassNow(active.id, at) ? 'no-pass' : 'open';
+  if (account.manualNoPass) return "no-pass";
+  if (!active?.id) return active?.onSchedule ? "between" : "no-class";
+  return noPassNow(active.id, at) ? "no-pass" : "open";
 }
 
 export const passStatusText: Record<PassStatus, string> = {
-  open: 'Passes open',
-  'no-pass': 'No passes',
-  between: 'Between classes',
-  'no-class': 'No class',
+  open: "Passes open",
+  "no-pass": "No passes",
+  between: "Between classes",
+  "no-class": "No class",
 };
 
 /** Each status's icon, for the badge on Home and the corner of the sidebar box. */
 export const passStatusIcon: Record<PassStatus, IconName> = {
-  open: 'door',
-  'no-pass': 'ban',
-  between: 'pause',
-  'no-class': 'circle-slash',
+  open: "door",
+  "no-pass": "ban",
+  between: "pause",
+  "no-class": "circle-slash",
 };
 
 /** Whose passes picking a schedule would end, when it moves the kiosk to another class. */
@@ -758,17 +981,23 @@ export function useWarning(scheduleId: string) {
   if (!leaving || classScheduledNow(scheduleId) === leaving.id) return null;
   const out = openPasses(leaving.id).length;
   if (!out) return null;
-  return `The kiosk will move from ${leaving.name} now. ${out} ${out === 1 ? 'student is' : 'students are'} still out there; their passes will end with an unknown return time.`;
+  return `The kiosk will move from ${leaving.name} now. ${out} ${out === 1 ? "student is" : "students are"} still out there; their passes will end with an unknown return time.`;
 }
 
 /** What decides No-Pass Time, as the laptop knows it. */
 function noPassSources() {
-  return { schedule: currentSchedule(), activeClass: account.activeClass, manualNoPass: account.manualNoPass };
+  return {
+    schedule: currentSchedule(),
+    activeClass: account.activeClass,
+    manualNoPass: account.manualNoPass,
+  };
 }
 
 /** The No-Pass Time a class is in right now, if it's on the kiosk and in one. */
 export function noPassNow(classId: string, at = Date.now()) {
-  return account.activeClass?.id === classId ? noPassAt(noPassSources(), classId, at) : null;
+  return account.activeClass?.id === classId
+    ? noPassAt(noPassSources(), classId, at)
+    : null;
 }
 
 /**
@@ -783,13 +1012,25 @@ export function moveWarning(toClassId: string) {
     );
   }
   const leaving = findClass(account.activeClass?.id);
-  const out = leaving && leaving.id !== toClassId ? openPasses(leaving.id).length : 0;
+  const out =
+    leaving && leaving.id !== toClassId ? openPasses(leaving.id).length : 0;
   if (leaving && out) {
     warnings.push(
-      `${out} ${out === 1 ? 'student is' : 'students are'} still out in ${leaving.name}. Their passes will end with an unknown return time.`,
+      `${out} ${out === 1 ? "student is" : "students are"} still out in ${leaving.name}. Their passes will end with an unknown return time.`,
     );
   }
-  return warnings.length ? warnings.join(' ') : null;
+  const unresolvedHubMovements = account.hubVisits.filter(
+    (visit) =>
+      visit.classId === leaving?.id &&
+      !visit.arrivedBackAtClassAt &&
+      !visit.cancelledAt,
+  ).length;
+  if (unresolvedHubMovements) {
+    warnings.push(
+      `${unresolvedHubMovements} unresolved Hub ${unresolvedHubMovements === 1 ? "movement will" : "movements will"} remain open for review. No event times will be changed.`,
+    );
+  }
+  return warnings.length ? warnings.join(" ") : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -800,7 +1041,9 @@ export function moveWarning(toClassId: string) {
  * Switching between a limit on each destination and one Class Limit keeps the
  * other way's numbers, so switching back finds them as they were.
  */
-export function setPassOptions(options: Partial<Pick<Account, 'lineEnabled' | 'limitMode' | 'classLimit'>>) {
+export function setPassOptions(
+  options: Partial<Pick<Account, "lineEnabled" | "limitMode" | "classLimit">>,
+) {
   Object.assign(account, options);
   if (account.lineEnabled === false) account.line = [];
   save();
@@ -810,8 +1053,11 @@ export function setPassOptions(options: Partial<Pick<Account, 'lineEnabled' | 'l
  * Changing the number never resets anyone's count. Switching to "until I reset
  * it" starts counting from now, as pressing Reset does.
  */
-export function setPassAllowance(changes: Partial<Omit<PassAllowance, 'since'>>) {
-  const startsCounting = changes.per === 'reset' && account.passAllowance.per !== 'reset';
+export function setPassAllowance(
+  changes: Partial<Omit<PassAllowance, "since">>,
+) {
+  const startsCounting =
+    changes.per === "reset" && account.passAllowance.per !== "reset";
   Object.assign(account.passAllowance, changes);
   if (startsCounting) account.passAllowance.since = now();
   save();
@@ -829,12 +1075,22 @@ export function setLine(line: LineSpot[]) {
   save();
 }
 
+export function saveHubKioskSoundSettings(settings: HubKioskSoundSettings) {
+  if (!Number.isFinite(settings.volume) || settings.volume < 0 || settings.volume > 100) {
+    throw new RangeError("Hub kiosk sound volume must be between 0 and 100.");
+  }
+  account.hubKioskSoundSettings = { ...settings };
+  save();
+}
+
 // ---------------------------------------------------------------------------
 // Destinations
 // ---------------------------------------------------------------------------
 
 export function saveDestination(destination: Destination) {
-  const index = account.destinations.findIndex((each) => each.id === destination.id);
+  const index = account.destinations.findIndex(
+    (each) => each.id === destination.id,
+  );
   if (index === -1) account.destinations.push(destination);
   else account.destinations[index] = destination;
   save();
@@ -867,27 +1123,341 @@ export function findStudent(id: string | undefined) {
   return account.roster.find((student) => student.id === id);
 }
 
+export function addStudentCategory(name: string, color: StudentCategory["color"]) {
+  const label = name.trim();
+  if (!label) throw new Error("A category name is needed.");
+  if (
+    account.studentCategories.some(
+      (category) => category.name.toLocaleLowerCase() === label.toLocaleLowerCase(),
+    )
+  ) {
+    throw new Error("A category with that name already exists.");
+  }
+  const category = { id: newId(), name: label, color };
+  account.studentCategories.push(category);
+  save();
+  return category;
+}
+
+export function updateStudentCategory(
+  id: string,
+  changes: Pick<StudentCategory, "name" | "color">,
+) {
+  const category = account.studentCategories.find((each) => each.id === id);
+  if (!category) return;
+  const name = changes.name.trim();
+  if (!name) throw new Error("A category name is needed.");
+  if (
+    account.studentCategories.some(
+      (each) =>
+        each.id !== id &&
+        each.name.toLocaleLowerCase() === name.toLocaleLowerCase(),
+    )
+  ) {
+    throw new Error("A category with that name already exists.");
+  }
+  category.name = name;
+  category.color = changes.color;
+  save();
+}
+
+export function removeStudentCategory(id: string) {
+  if (account.roster.some((student) => student.categoryId === id)) {
+    throw new Error("Reassign students before removing this category.");
+  }
+  const next = account.studentCategories.filter((category) => category.id !== id);
+  if (next.length === account.studentCategories.length) return;
+  account.studentCategories = next;
+  save();
+}
+
+export function setStudentCategory(studentId: string, categoryId: string | null) {
+  const student = findStudent(studentId);
+  if (!student || student.categoryId === (categoryId || undefined)) return;
+  if (
+    categoryId &&
+    !account.studentCategories.some((category) => category.id === categoryId)
+  ) {
+    throw new Error("That student category is no longer available.");
+  }
+  if (categoryId) student.categoryId = categoryId;
+  else delete student.categoryId;
+  save();
+}
+
+// ---------------------------------------------------------------------------
+// Hub visits
+// ---------------------------------------------------------------------------
+
+type NewHubVisit = {
+  studentId: string;
+  destinationId: string;
+  classId?: string;
+  className?: string;
+  periodName?: string;
+  hasConcern?: boolean;
+};
+
+function activeHubVisitFor(studentId: string) {
+  return account.hubVisits.find(
+    (visit) =>
+      visit.studentId === studentId &&
+      !visit.arrivedBackAtClassAt &&
+      !visit.cancelledAt,
+  );
+}
+
+function createHubVisit(
+  input: NewHubVisit,
+  event: Pick<HubVisit, "source" | "leftClassAt" | "arrivedAtHubAt">,
+) {
+  const student = findStudent(input.studentId);
+  if (!student) throw new Error("That student is no longer on the Roster.");
+  const destination = account.destinations.find(
+    (each) => each.id === input.destinationId,
+  );
+  if (!destination) throw new Error("That visit destination is no longer available.");
+  if (event.source === "classroom-notification" && !destination.informHubAvailable)
+    throw new Error("That destination is not enabled for Inform the Hub.");
+  if (input.hasConcern && event.source !== "classroom-notification")
+    throw new Error("Concern notes can only be attached to a classroom notification.");
+  if (activeHubVisitFor(student.id))
+    throw new Error("This student already has an active Hub movement.");
+
+  const category = account.studentCategories.find(
+    (each) => each.id === student.categoryId,
+  );
+  const cls = findClass(input.classId);
+  const memberPrefix =
+    cls?.members.find((member) => member.studentId === student.id)
+      ?.lastPrefix ?? "";
+  const visit: HubVisit = {
+    id: newId(),
+    studentId: student.id,
+    studentName: student.lastName
+      ? `${student.firstName} ${student.lastName}`
+      : displayName({ firstName: student.firstName, lastPrefix: memberPrefix }),
+    ...(category ? { studentCategory: { ...category } } : {}),
+    destinationId: destination.id,
+    destinationLabel: destination.label,
+    ...(input.classId ? { classId: input.classId } : {}),
+    ...(input.className || cls?.name
+      ? { className: input.className ?? cls?.name }
+      : {}),
+    ...(input.periodName ? { periodName: input.periodName } : {}),
+    ...(input.hasConcern ? { hasConcern: true } : {}),
+    ...event,
+    temporaryTrips: [],
+  };
+  account.hubVisits.push(visit);
+  save();
+  return visit.id;
+}
+
+function hubVisitById(id: string) {
+  const visit = account.hubVisits.find((each) => each.id === id);
+  if (!visit) throw new Error("That Hub movement no longer exists.");
+  return visit;
+}
+
+function ensureHubVisitAtHub(visit: HubVisit) {
+  if (
+    !visit.arrivedAtHubAt ||
+    visit.leftHubAt ||
+    visit.arrivedBackAtClassAt
+  ) {
+    throw new Error("This student is not currently signed in at the Hub.");
+  }
+}
+
+/** Records that classroom staff notified the Hub; this does not imply arrival. */
+export function notifyHubVisit(input: NewHubVisit, at = now()) {
+  if (!input.classId)
+    throw new Error("Choose the class the student is leaving.");
+  const cls = findClass(input.classId);
+  if (
+    !cls?.members.some(
+      (member) =>
+        member.studentId === input.studentId && member.status === "current",
+    )
+  ) {
+    throw new Error("That student is not currently in the selected class.");
+  }
+  return createHubVisit(input, {
+    source: "classroom-notification",
+    leftClassAt: at,
+  });
+}
+
+/** Starts a visit for a student who arrived directly at the kiosk. */
+export function startHubVisit(input: NewHubVisit, at = now()) {
+  return createHubVisit(input, {
+    source: "direct-kiosk-arrival",
+    arrivedAtHubAt: at,
+  });
+}
+
+/** Records physical arrival for a previously notified student. */
+export function recordHubArrival(visitId: string, at = now()) {
+  const visit = hubVisitById(visitId);
+  if (
+    visit.source !== "classroom-notification" ||
+    !visit.leftClassAt ||
+    visit.arrivedAtHubAt ||
+    visit.leftHubAt ||
+    visit.arrivedBackAtClassAt ||
+    visit.cancelledAt
+  ) {
+    throw new Error("This student is not waiting to arrive at the Hub.");
+  }
+  visit.arrivedAtHubAt = at;
+  save();
+}
+
+export function hubVisitStatus(visit: HubVisit) {
+  if (visit.arrivedBackAtClassAt) return "returned-to-class";
+  if (visit.cancelledAt)
+    return visit.cancellationReason === "did-not-arrive"
+      ? "did-not-arrive"
+      : "cancelled";
+  if (visit.leftHubAt) return "left-hub-awaiting-class";
+  if (
+    visit.temporaryTrips.some((trip) => !trip.returnedAt)
+  ) {
+    return "on-temporary-trip";
+  }
+  if (visit.arrivedAtHubAt) return "at-hub";
+  return "on-the-way";
+}
+
+/** Closes a classroom notification that has not physically arrived at the Hub. */
+export function cancelHubVisitNotification(
+  visitId: string,
+  reason: HubVisitCancellationReason,
+  at = now(),
+) {
+  const visit = hubVisitById(visitId);
+  if (reason !== "withdrawn" && reason !== "did-not-arrive") {
+    throw new Error(
+      "Choose whether the notification was withdrawn or the student did not arrive.",
+    );
+  }
+  if (
+    visit.source !== "classroom-notification" ||
+    !visit.leftClassAt ||
+    visit.arrivedAtHubAt ||
+    visit.leftHubAt ||
+    visit.arrivedBackAtClassAt ||
+    visit.cancelledAt ||
+    visit.temporaryTrips.length
+  ) {
+    throw new Error(
+      "Only a classroom notification that has not arrived at the Hub can be cancelled.",
+    );
+  }
+  visit.cancelledAt = at;
+  visit.cancellationReason = reason;
+  save();
+}
+
+/** Starts one temporary trip without ending the Main Hub Visit. */
+export function startTemporaryTrip(
+  visitId: string,
+  destinationLabel: string,
+  at = now(),
+) {
+  const visit = hubVisitById(visitId);
+  ensureHubVisitAtHub(visit);
+  if (
+    account.hubVisits.some(
+      (each) =>
+        each.studentId === visit.studentId &&
+        each.temporaryTrips.some((trip) => !trip.returnedAt),
+    )
+  )
+    throw new Error("This student already has an active Temporary Trip.");
+  const label = destinationLabel.trim();
+  if (!label) throw new Error("A Temporary Trip destination is needed.");
+  const tripId = newId();
+  visit.temporaryTrips.push({
+    id: tripId,
+    destinationLabel: label,
+    startedAt: at,
+  });
+  save();
+  return tripId;
+}
+
+/** Closes the active Temporary Trip and returns the student to the same visit. */
+export function returnFromTemporaryTrip(
+  visitId: string,
+  tripId: string,
+  at = now(),
+) {
+  const visit = hubVisitById(visitId);
+  ensureHubVisitAtHub(visit);
+  const trip = visit.temporaryTrips.find((each) => each.id === tripId);
+  if (!trip || trip.returnedAt)
+    throw new Error("That Temporary Trip is not active.");
+  trip.returnedAt = at;
+  save();
+}
+
+/** Ends the Main Hub Visit; class return remains unconfirmed until staff act. */
+export function leaveHub(visitId: string, at = now()) {
+  const visit = hubVisitById(visitId);
+  ensureHubVisitAtHub(visit);
+  if (visit.temporaryTrips.some((trip) => !trip.returnedAt))
+    throw new Error("The active Temporary Trip must return before leaving the Hub.");
+  visit.leftHubAt = at;
+  save();
+}
+
+/** Records staff confirmation after physically seeing the student back in class. */
+export function confirmArrivedBackAtClass(visitId: string, at = now()) {
+  const visit = hubVisitById(visitId);
+  if (
+    !visit.leftHubAt ||
+    visit.arrivedBackAtClassAt ||
+    visit.temporaryTrips.some((trip) => !trip.returnedAt)
+  )
+    throw new Error("This student is not awaiting confirmation back at class.");
+  visit.arrivedBackAtClassAt = at;
+  save();
+}
+
 /** A class's students, each as they are in that class. */
 export function classStudents(cls: Class | undefined): ClassStudent[] {
   return (cls?.members ?? []).flatMap((member) => {
     const student = findStudent(member.studentId);
-    return student ? [{ ...student, lastPrefix: member.lastPrefix, status: member.status }] : [];
+    return student
+      ? [{ ...student, lastPrefix: member.lastPrefix, status: member.status }]
+      : [];
   });
 }
 
 /** One student as they are in one class. */
 export function classStudent(classId: string, studentId: string) {
-  return classStudents(findClass(classId)).find((student) => student.id === studentId);
+  return classStudents(findClass(classId)).find(
+    (student) => student.id === studentId,
+  );
 }
 
 function memberOf(classId: string, studentId: string) {
-  return findClass(classId)?.members.find((member) => member.studentId === studentId);
+  return findClass(classId)?.members.find(
+    (member) => member.studentId === studentId,
+  );
 }
 
 /** The names of the classes a student is in right now. */
 export function classesOf(studentId: string) {
   return account.classes
-    .filter((cls) => cls.members.some((member) => member.studentId === studentId && member.status === 'current'))
+    .filter((cls) =>
+      cls.members.some(
+        (member) =>
+          member.studentId === studentId && member.status === "current",
+      ),
+    )
     .map((cls) => cls.name);
 }
 
@@ -899,10 +1469,16 @@ export function classesOf(studentId: string) {
 export function rosterCandidates(classId: string): RosterCandidate[] {
   const cls = findClass(classId);
   return account.roster
-    .filter((student) => !cls?.members.some((member) => member.studentId === student.id))
+    .filter(
+      (student) =>
+        !cls?.members.some((member) => member.studentId === student.id),
+    )
     .map((student) => ({
       student,
-      prefix: account.classes.flatMap((each) => each.members).find((member) => member.studentId === student.id)?.lastPrefix ?? '',
+      prefix:
+        account.classes
+          .flatMap((each) => each.members)
+          .find((member) => member.studentId === student.id)?.lastPrefix ?? "",
       classes: classesOf(student.id),
     }));
 }
@@ -912,28 +1488,39 @@ export function rosterCandidates(classId: string): RosterCandidate[] {
  * the list only fills in what's missing, and a different PIN is used only for
  * the students in `acceptPins`, whom the teacher confirmed.
  */
-export function applyImport(classId: string, plan: ImportPlan, removeIds: string[], acceptPins: Set<string> = new Set()) {
+export function applyImport(
+  classId: string,
+  plan: ImportPlan,
+  removeIds: string[],
+  acceptPins: Set<string> = new Set(),
+) {
   const cls = findClass(classId);
   if (!cls || plan.error) return;
   const setPin = (student: Student, pin: string | undefined) => {
     if (pin && (!student.pin || acceptPins.has(student.id))) student.pin = pin;
   };
   for (const change of plan.matched) {
-    const member = cls.members.find((each) => each.studentId === change.student.id);
+    const member = cls.members.find(
+      (each) => each.studentId === change.student.id,
+    );
     const student = findStudent(change.student.id);
     if (member) member.lastPrefix = change.lastPrefix;
     // Pasting a class list again fills in the full names of students imported before they were kept.
-    if (student && change.lastName && !student.lastName) student.lastName = change.lastName;
+    if (student && change.lastName && !student.lastName)
+      student.lastName = change.lastName;
     if (student) setPin(student, change.pin);
   }
   const joined = new Set(cls.members.map((member) => member.studentId));
   const newStudentIds = new Set<string>();
   for (const entry of plan.added) {
-    let student = entry.rosterMatch ? findStudent(entry.rosterMatch.studentId) : undefined;
+    let student = entry.rosterMatch
+      ? findStudent(entry.rosterMatch.studentId)
+      : undefined;
     // Never two places in one class for one student.
     if (student && joined.has(student.id)) student = undefined;
     if (student) {
-      if (entry.lastName && !student.lastName) student.lastName = entry.lastName;
+      if (entry.lastName && !student.lastName)
+        student.lastName = entry.lastName;
       setPin(student, entry.pin);
     } else {
       student = { id: newId(), firstName: entry.firstName };
@@ -943,7 +1530,11 @@ export function applyImport(classId: string, plan: ImportPlan, removeIds: string
       newStudentIds.add(student.id);
     }
     joined.add(student.id);
-    cls.members.push({ studentId: student.id, lastPrefix: entry.lastPrefix, status: 'current' });
+    cls.members.push({
+      studentId: student.id,
+      lastPrefix: entry.lastPrefix,
+      status: "current",
+    });
   }
   for (const id of removeIds) removeStudentFrom(cls, id);
   // Only students new to the Roster get a PIN; students who had none before stay without one until the teacher asks.
@@ -956,7 +1547,10 @@ export function applyImport(classId: string, plan: ImportPlan, removeIds: string
  * the Roster and never the teacher's.
  */
 function giveEveryonePins(only?: Set<string>) {
-  const taken = new Set([account.pin, ...account.roster.flatMap((student) => (student.pin ? [student.pin] : []))]);
+  const taken = new Set([
+    account.pin,
+    ...account.roster.flatMap((student) => (student.pin ? [student.pin] : [])),
+  ]);
   for (const student of account.roster) {
     if (student.pin || (only && !only.has(student.id))) continue;
     student.pin = randomPin(taken);
@@ -991,7 +1585,13 @@ export function isStudentPin(pin: string) {
 }
 
 /** The first name and full last name belong to the student; the letters shown belong to this class. */
-export function renameStudent(classId: string, studentId: string, firstName: string, lastPrefix: string, lastName?: string) {
+export function renameStudent(
+  classId: string,
+  studentId: string,
+  firstName: string,
+  lastPrefix: string,
+  lastName?: string,
+) {
   const student = findStudent(studentId);
   const member = memberOf(classId, studentId);
   if (!student || !member) return;
@@ -1007,15 +1607,25 @@ export function renameStudent(classId: string, studentId: string, firstName: str
  * right now from this class has that pass ended with an unknown return.
  */
 function removeStudentFrom(cls: Class, studentId: string) {
-  const open = account.passes.filter((pass) => pass.studentId === studentId && pass.classId === cls.id && !pass.inAt);
-  mergeInto(account.passes, open.map((pass) => endUnseen(pass, 'removed')));
+  const open = account.passes.filter(
+    (pass) =>
+      pass.studentId === studentId && pass.classId === cls.id && !pass.inAt,
+  );
+  mergeInto(
+    account.passes,
+    open.map((pass) => endUnseen(pass, "removed")),
+  );
   // Passes and Attendance are both history: a student with either stays, as a former student.
   const hasHistory =
-    account.passes.some((pass) => pass.studentId === studentId && pass.classId === cls.id) ||
-    account.attendance.some((mark) => mark.studentId === studentId && mark.classId === cls.id);
+    account.passes.some(
+      (pass) => pass.studentId === studentId && pass.classId === cls.id,
+    ) ||
+    account.attendance.some(
+      (mark) => mark.studentId === studentId && mark.classId === cls.id,
+    );
   if (hasHistory) {
     const member = cls.members.find((each) => each.studentId === studentId);
-    if (member) member.status = 'former';
+    if (member) member.status = "former";
   } else {
     cls.members = cls.members.filter((each) => each.studentId !== studentId);
   }
@@ -1026,7 +1636,9 @@ function removeStudentFrom(cls: Class, studentId: string) {
 function forgetUnusedStudents() {
   account.roster = account.roster.filter(
     (student) =>
-      account.classes.some((cls) => cls.members.some((member) => member.studentId === student.id)) ||
+      account.classes.some((cls) =>
+        cls.members.some((member) => member.studentId === student.id),
+      ) ||
       account.passes.some((pass) => pass.studentId === student.id) ||
       account.attendance.some((mark) => mark.studentId === student.id),
   );
@@ -1059,7 +1671,7 @@ export function restoreStudent(classId: string, studentId: string) {
   const cls = findClass(classId);
   const member = memberOf(classId, studentId);
   if (!cls || !member) return;
-  member.status = 'current';
+  member.status = "current";
   if (account.studentPins) giveEveryonePins(new Set([studentId]));
   save();
 }
@@ -1076,7 +1688,11 @@ export function restoreStudent(classId: string, studentId: string) {
  * undone, and the merged-away id is remembered so a kiosk that missed it can't
  * bring that student back.
  */
-export function mergeStudents(keepId: string, dropId: string, pinFrom: string = keepId) {
+export function mergeStudents(
+  keepId: string,
+  dropId: string,
+  pinFrom: string = keepId,
+) {
   const keep = findStudent(keepId);
   const drop = findStudent(dropId);
   if (!keep || !drop || keepId === dropId) return;
@@ -1086,10 +1702,13 @@ export function mergeStudents(keepId: string, dropId: string, pinFrom: string = 
     keep: $state.snapshot(keep) as Student,
     drop: $state.snapshot(drop) as Student,
     memberships: [],
-    keepClassIds: account.classes.filter((cls) => cls.members.some((each) => each.studentId === keepId)).map((cls) => cls.id),
+    keepClassIds: account.classes
+      .filter((cls) => cls.members.some((each) => each.studentId === keepId))
+      .map((cls) => cls.id),
     passIds: [],
     requestIds: [],
     deniedIds: [],
+    hubVisitIds: [],
     attendanceIds: [],
     removedMarks: [],
     removedClaims: [],
@@ -1097,8 +1716,12 @@ export function mergeStudents(keepId: string, dropId: string, pinFrom: string = 
   for (const cls of account.classes) {
     const member = cls.members.find((each) => each.studentId === dropId);
     if (!member) continue;
-    record.memberships.push({ classId: cls.id, member: $state.snapshot(member) as Member });
-    if (cls.members.some((each) => each.studentId === keepId)) cls.members = cls.members.filter((each) => each !== member);
+    record.memberships.push({
+      classId: cls.id,
+      member: $state.snapshot(member) as Member,
+    });
+    if (cls.members.some((each) => each.studentId === keepId))
+      cls.members = cls.members.filter((each) => each !== member);
     else member.studentId = keepId;
   }
   const moved = now();
@@ -1108,10 +1731,20 @@ export function mergeStudents(keepId: string, dropId: string, pinFrom: string = 
     pass.updatedAt = moved;
     record.passIds.push(pass.id);
   }
+  for (const visit of account.hubVisits) {
+    if (visit.studentId !== dropId) continue;
+    visit.studentId = keepId;
+    record.hubVisitIds!.push(visit.id);
+  }
   // The Line lasts minutes, so a spot just moves to the kept student and isn't undone.
-  for (const spot of account.line) if (spot.studentId === dropId) spot.studentId = keepId;
-  for (const each of account.requests) if (each.studentId === dropId) (each.studentId = keepId), record.requestIds.push(each.id);
-  for (const each of account.deniedRequests) if (each.studentId === dropId) (each.studentId = keepId), record.deniedIds.push(each.id);
+  for (const spot of account.line)
+    if (spot.studentId === dropId) spot.studentId = keepId;
+  for (const each of account.requests)
+    if (each.studentId === dropId)
+      ((each.studentId = keepId), record.requestIds.push(each.id));
+  for (const each of account.deniedRequests)
+    if (each.studentId === dropId)
+      ((each.studentId = keepId), record.deniedIds.push(each.id));
   // One mark per class and day: where the kept student already has one, theirs stands.
   for (const mark of [...account.attendance]) {
     if (mark.studentId !== dropId) continue;
@@ -1126,9 +1759,12 @@ export function mergeStudents(keepId: string, dropId: string, pinFrom: string = 
     }
   }
   // One device per student: the merged-away student's devices stop acting for anyone.
-  record.removedClaims = account.claims.filter((claim) => claim.studentId === dropId).map((claim) => ({ ...claim }));
+  record.removedClaims = account.claims
+    .filter((claim) => claim.studentId === dropId)
+    .map((claim) => ({ ...claim }));
   account.claims = account.claims.filter((claim) => claim.studentId !== dropId);
   keep.lastName ??= drop.lastName;
+  keep.categoryId ??= drop.categoryId;
   if (pinFrom === dropId && drop.pin) keep.pin = drop.pin;
   else keep.pin ??= drop.pin;
   if (drop.exempt) keep.exempt = true;
@@ -1144,7 +1780,17 @@ export function undoMerge(recordId: string) {
   const record = account.merges?.find((each) => each.id === recordId);
   if (!record) return;
   const keep = findStudent(record.keep.id);
-  if (keep) Object.assign(keep, { lastName: record.keep.lastName, pin: record.keep.pin, exempt: record.keep.exempt, alwaysGo: record.keep.alwaysGo });
+  if (keep)
+    Object.assign(keep, {
+      lastName: record.keep.lastName,
+      pin: record.keep.pin,
+      exempt: record.keep.exempt,
+      alwaysGo: record.keep.alwaysGo,
+    });
+  if (keep) {
+    if (record.keep.categoryId) keep.categoryId = record.keep.categoryId;
+    else delete keep.categoryId;
+  }
   if (!findStudent(record.drop.id)) account.roster.push(record.drop);
   for (const { classId, member } of record.memberships) {
     const cls = findClass(classId);
@@ -1154,21 +1800,30 @@ export function undoMerge(recordId: string) {
       cls.members.push(member);
     } else {
       // Only the merged-away student was; the kept student's place here was theirs.
-      const theirs = cls.members.find((each) => each.studentId === record.keep.id);
+      const theirs = cls.members.find(
+        (each) => each.studentId === record.keep.id,
+      );
       if (theirs) Object.assign(theirs, member);
       else cls.members.push(member);
     }
   }
-  const back = (ids: string[], list: { id: string; studentId: string; updatedAt?: string }[]) => {
+  const back = (
+    ids: string[],
+    list: { id: string; studentId: string; updatedAt?: string }[],
+  ) => {
     for (const each of list) {
       if (!ids.includes(each.id)) continue;
       each.studentId = record.drop.id;
-      if ('updatedAt' in each) each.updatedAt = now();
+      if ("updatedAt" in each) each.updatedAt = now();
     }
   };
   back(record.passIds, account.passes);
   back(record.requestIds, account.requests);
   back(record.deniedIds, account.deniedRequests);
+  for (const visit of account.hubVisits) {
+    if (record.hubVisitIds?.includes(visit.id))
+      visit.studentId = record.drop.id;
+  }
   for (const mark of account.attendance) {
     if (!record.attendanceIds.includes(mark.id)) continue;
     mark.studentId = record.drop.id;
@@ -1176,7 +1831,11 @@ export function undoMerge(recordId: string) {
     mark.updatedAt = now();
   }
   account.attendance.push(...record.removedMarks);
-  account.claims.push(...record.removedClaims.filter((claim) => !account.claims.some((each) => each.token === claim.token)));
+  account.claims.push(
+    ...record.removedClaims.filter(
+      (claim) => !account.claims.some((each) => each.token === claim.token),
+    ),
+  );
   if (account.mergedIds) {
     const { [record.drop.id]: _undone, ...rest } = account.mergedIds;
     account.mergedIds = rest;
@@ -1187,8 +1846,10 @@ export function undoMerge(recordId: string) {
 
 /** The teacher said these two are different students: never offer them again. */
 export function dismissMerge(firstId: string, secondId: string) {
-  const key = [firstId, secondId].sort().join('|');
-  account.dismissedMerges = [...new Set([...(account.dismissedMerges ?? []), key])];
+  const key = [firstId, secondId].sort().join("|");
+  account.dismissedMerges = [
+    ...new Set([...(account.dismissedMerges ?? []), key]),
+  ];
   save();
 }
 
@@ -1220,11 +1881,17 @@ export function setAsksForPins(classId: string, on: boolean) {
 }
 
 /** What students can see in a class: everything, unless the teacher turned something off. */
-export function visibilityOf(cls: { visibility?: Partial<ClassVisibility> } | null | undefined): ClassVisibility {
+export function visibilityOf(
+  cls: { visibility?: Partial<ClassVisibility> } | null | undefined,
+): ClassVisibility {
   return { names: true, where: true, lineNames: true, ...cls?.visibility };
 }
 
-export function setVisibility(classId: string, key: keyof ClassVisibility, on: boolean) {
+export function setVisibility(
+  classId: string,
+  key: keyof ClassVisibility,
+  on: boolean,
+) {
   const cls = findClass(classId);
   if (!cls) return;
   const next = { ...cls.visibility };
@@ -1246,19 +1913,30 @@ export function setAttendance(options: AttendanceOptions | null) {
   save();
 }
 
-export function attendanceMark(classId: string, studentId: string, day = today()) {
-  return account.attendance.find((mark) => mark.classId === classId && mark.studentId === studentId && mark.day === day);
+export function attendanceMark(
+  classId: string,
+  studentId: string,
+  day = today(),
+) {
+  return account.attendance.find(
+    (mark) =>
+      mark.classId === classId &&
+      mark.studentId === studentId &&
+      mark.day === day,
+  );
 }
 
 /** Today's marks for a class. */
 export function attendanceToday(classId: string) {
   const day = today();
-  return account.attendance.filter((mark) => mark.classId === classId && mark.day === day);
+  return account.attendance.filter(
+    (mark) => mark.classId === classId && mark.day === day,
+  );
 }
 
 /** Whether a student is Absent from a class today, and so hidden from the door. */
 export function isAbsent(classId: string, studentId: string) {
-  return attendanceMark(classId, studentId)?.status === 'absent';
+  return attendanceMark(classId, studentId)?.status === "absent";
 }
 
 /** One mark per student, class and day, so its id is just those. Saved marks carry no id of their own. */
@@ -1266,15 +1944,19 @@ function markId(classId: string, day: string, studentId: string) {
   return `${classId}|${day}|${studentId}`;
 }
 
-function newMark(classId: string, studentId: string, day: string): AttendanceMark {
+function newMark(
+  classId: string,
+  studentId: string,
+  day: string,
+): AttendanceMark {
   const student = classStudent(classId, studentId);
   const mark: AttendanceMark = {
     id: markId(classId, day, studentId),
     classId,
     studentId,
-    studentName: student ? displayName(student) : '',
+    studentName: student ? displayName(student) : "",
     day,
-    status: 'absent',
+    status: "absent",
     updatedAt: now(),
   };
   account.attendance.push(mark);
@@ -1283,9 +1965,24 @@ function newMark(classId: string, studentId: string, day: string): AttendanceMar
 
 /** When a class's Absent clock started today: its period's start on the Schedule, or when it came on the door. */
 function absentClockStart(classId: string, at: number) {
-  const period = account.activeClass?.onSchedule ? periodFor(currentSchedule(), classId, at) : null;
-  if (period) return { start: new Date(new Date(at).setHours(...(period.start.split(':').map(Number) as [number, number]), 0, 0)).getTime(), period };
-  return { start: new Date(account.activeClass?.changedAt ?? at).getTime(), period: null };
+  const period = account.activeClass?.onSchedule
+    ? periodFor(currentSchedule(), classId, at)
+    : null;
+  if (period)
+    return {
+      start: new Date(
+        new Date(at).setHours(
+          ...(period.start.split(":").map(Number) as [number, number]),
+          0,
+          0,
+        ),
+      ).getTime(),
+      period,
+    };
+  return {
+    start: new Date(account.activeClass?.changedAt ?? at).getTime(),
+    period: null,
+  };
 }
 
 /**
@@ -1294,7 +1991,12 @@ function absentClockStart(classId: string, at: number) {
  * Tardy. Only the first Arrival counts. Returns whether anything changed; the
  * caller saves.
  */
-function arrive(classId: string, studentId: string, at: string, byTeacher: boolean) {
+function arrive(
+  classId: string,
+  studentId: string,
+  at: string,
+  byTeacher: boolean,
+) {
   const rules = account.attendanceRules;
   if (!findClass(classId) || !rules) return false;
   const existing = attendanceMark(classId, studentId, today(at));
@@ -1302,15 +2004,18 @@ function arrive(classId: string, studentId: string, at: string, byTeacher: boole
   const counted = arrivalStatus(currentSchedule(), classId, rules, at);
   const mark = existing ?? newMark(classId, studentId, today(at));
   mark.arrivedAt = at;
-  if (existing?.status === 'absent') {
+  if (existing?.status === "absent") {
     // Arriving after being marked Absent is always Tardy.
     const { start } = absentClockStart(classId, new Date(at).getTime());
-    mark.status = 'tardy';
-    mark.tardyMinutes = counted.status === 'tardy' ? counted.tardyMinutes : Math.max(0, Math.round((new Date(at).getTime() - start) / 60_000));
+    mark.status = "tardy";
+    mark.tardyMinutes =
+      counted.status === "tardy"
+        ? counted.tardyMinutes
+        : Math.max(0, Math.round((new Date(at).getTime() - start) / 60_000));
     delete mark.goneForDay;
   } else {
     mark.status = counted.status;
-    if (counted.status === 'tardy') mark.tardyMinutes = counted.tardyMinutes;
+    if (counted.status === "tardy") mark.tardyMinutes = counted.tardyMinutes;
   }
   if (byTeacher && existing) mark.corrected = true;
   mark.updatedAt = now();
@@ -1327,7 +2032,8 @@ export function receiveArrivals(arrivals: OfflineArrival[]) {
   for (const each of arrivals) {
     const studentId = keptStudentId(each.studentId);
     // A mark the teacher set by hand stands over a kiosk's late hand-over.
-    if (attendanceMark(each.classId, studentId, today(each.at))?.corrected) continue;
+    if (attendanceMark(each.classId, studentId, today(each.at))?.corrected)
+      continue;
     changed = arrive(each.classId, studentId, each.at, false) || changed;
   }
   if (changed) save();
@@ -1337,24 +2043,36 @@ export function receiveArrivals(arrivals: OfflineArrival[]) {
  * The teacher marks a student by hand: arrived now, Tardy, Absent, or back to
  * nothing yet. Changing a mark that was already there is a Correction.
  */
-export function markAttendance(classId: string, studentId: string, status: 'present' | 'tardy' | 'absent' | 'clear') {
+export function markAttendance(
+  classId: string,
+  studentId: string,
+  status: "present" | "tardy" | "absent" | "clear",
+) {
   const day = today();
   const existing = attendanceMark(classId, studentId, day);
-  if (status === 'clear') {
+  if (status === "clear") {
     account.attendance = account.attendance.filter((mark) => mark !== existing);
     save();
     return;
   }
   // Arriving after being marked Absent is a late Arrival, so Tardy.
-  if (status === 'present' && existing?.status === 'absent' && arrive(classId, studentId, now(), true)) {
+  if (
+    status === "present" &&
+    existing?.status === "absent" &&
+    arrive(classId, studentId, now(), true)
+  ) {
     save();
     return;
   }
-  if (!existing && status !== 'absent' && arrive(classId, studentId, now(), true)) {
+  if (
+    !existing &&
+    status !== "absent" &&
+    arrive(classId, studentId, now(), true)
+  ) {
     const mark = attendanceMark(classId, studentId, day)!;
-    if (status === 'tardy' && mark.status !== 'tardy') mark.status = 'tardy';
-    if (status === 'present' && mark.status !== 'present') {
-      mark.status = 'present';
+    if (status === "tardy" && mark.status !== "tardy") mark.status = "tardy";
+    if (status === "present" && mark.status !== "present") {
+      mark.status = "present";
       delete mark.tardyMinutes;
     }
     save();
@@ -1362,10 +2080,10 @@ export function markAttendance(classId: string, studentId: string, status: 'pres
   }
   const mark = existing ?? newMark(classId, studentId, day);
   mark.status = status;
-  if (status === 'present') delete mark.tardyMinutes;
-  if (status !== 'tardy') delete mark.excused;
-  if (status === 'absent') delete mark.arrivedAt;
-  if (status !== 'absent') mark.arrivedAt ??= now();
+  if (status === "present") delete mark.tardyMinutes;
+  if (status !== "tardy") delete mark.excused;
+  if (status === "absent") delete mark.arrivedAt;
+  if (status !== "absent") mark.arrivedAt ??= now();
   if (existing) mark.corrected = true;
   mark.updatedAt = now();
   save();
@@ -1373,7 +2091,7 @@ export function markAttendance(classId: string, studentId: string, status: 'pres
 
 export function setExcused(markId: string, excused: boolean) {
   const mark = account.attendance.find((each) => each.id === markId);
-  if (!mark || mark.status !== 'tardy') return;
+  if (!mark || mark.status !== "tardy") return;
   mark.excused = excused || undefined;
   mark.corrected = true;
   mark.updatedAt = now();
@@ -1391,16 +2109,25 @@ export function goneForTheDay(studentId: string) {
   const clock = clockOf(Date.now());
   const schedule = currentSchedule();
   for (const cls of account.classes) {
-    if (!account.attendanceRules || !cls.members.some((member) => member.studentId === studentId && member.status === 'current')) continue;
+    if (
+      !account.attendanceRules ||
+      !cls.members.some(
+        (member) =>
+          member.studentId === studentId && member.status === "current",
+      )
+    )
+      continue;
     const existing = attendanceMark(cls.id, studentId, day);
     if (existing?.arrivedAt) continue;
     const isOn = account.activeClass?.id === cls.id;
     const later = schedule
-      ? schedule.periods.some((period) => period.classId === cls.id && period.start > clock)
+      ? schedule.periods.some(
+          (period) => period.classId === cls.id && period.start > clock,
+        )
       : !existing;
     if (!isOn && !later) continue;
     const mark = existing ?? newMark(cls.id, studentId, day);
-    mark.status = 'absent';
+    mark.status = "absent";
     mark.goneForDay = true;
     mark.updatedAt = now();
   }
@@ -1419,16 +2146,37 @@ function markAbsences(at = Date.now(), leaving = false) {
   const rules = account.attendanceRules;
   if (!active?.id || !cls || !rules || today(active.changedAt) !== today(at)) {
     // A class on the door since before today came on today when the day began, if it's on the Schedule today.
-    if (!(active?.id && cls && rules && active.onSchedule && periodFor(currentSchedule(), active.id, at))) return false;
+    if (!(
+      active?.id &&
+      cls &&
+      rules &&
+      active.onSchedule &&
+      periodFor(currentSchedule(), active.id, at)
+    ))
+      return false;
   }
   const { start, period } = absentClockStart(cls!.id, at);
   const due = start + rules!.absentAfterMinutes * 60_000;
-  const ended = period ? at >= new Date(new Date(at).setHours(...(period.end.split(':').map(Number) as [number, number]), 0, 0)).getTime() : false;
-  if (!(at >= due || ended || (leaving && (active!.onSchedule || at >= due)))) return false;
+  const ended = period
+    ? at >=
+      new Date(
+        new Date(at).setHours(
+          ...(period.end.split(":").map(Number) as [number, number]),
+          0,
+          0,
+        ),
+      ).getTime()
+    : false;
+  if (!(at >= due || ended || (leaving && (active!.onSchedule || at >= due))))
+    return false;
   const day = today(at);
   let changed = false;
   for (const member of cls!.members) {
-    if (member.status !== 'current' || attendanceMark(cls!.id, member.studentId, day)) continue;
+    if (
+      member.status !== "current" ||
+      attendanceMark(cls!.id, member.studentId, day)
+    )
+      continue;
     newMark(cls!.id, member.studentId, day);
     changed = true;
   }
@@ -1452,9 +2200,17 @@ export function receivePasses(passes: Pass[]) {
 
 /** Takes in other copies of passes (a kiosk's, an older tab's), keeping everything the teacher changed here. */
 function foldPasses(passes: Pass[]) {
-  const before = new Map(account.passes.map((pass) => [pass.id, $state.snapshot(pass) as Pass]));
+  const before = new Map(
+    account.passes.map((pass) => [pass.id, $state.snapshot(pass) as Pass]),
+  );
   // A kiosk that hasn't heard about a merge still has the merged-away student.
-  mergeInto(account.passes, passes.map((pass) => ({ ...pass, studentId: keptStudentId(pass.studentId) })));
+  mergeInto(
+    account.passes,
+    passes.map((pass) => ({
+      ...pass,
+      studentId: keptStudentId(pass.studentId),
+    })),
+  );
   for (const pass of account.passes) {
     const mine = before.get(pass.id);
     if (mine) keepTeacherEdits(pass, mine);
@@ -1491,7 +2247,8 @@ function keepTeacherEdits(pass: Pass, mine: Pass) {
 /** The student a merged-away student became, or the same student. */
 export function keptStudentId(studentId: string) {
   let id = studentId;
-  for (let hops = 0; account.mergedIds?.[id] && hops < 10; hops++) id = account.mergedIds[id];
+  for (let hops = 0; account.mergedIds?.[id] && hops < 10; hops++)
+    id = account.mergedIds[id];
   return id;
 }
 
@@ -1506,7 +2263,11 @@ export function receiveReturns(returns: OfflineReturn[]) {
     // A cancel, or a return time the teacher set, stands; an open pass they corrected still takes the return.
     // Either way the kiosk is told it was received.
     if (pass.cancelledBy || (pass.corrected && pass.inAt)) continue;
-    Object.assign(pass, { inAt: back.inAt, endedBy: 'student', updatedAt: now() });
+    Object.assign(pass, {
+      inAt: back.inAt,
+      endedBy: "student",
+      updatedAt: now(),
+    });
   }
   save();
 }
@@ -1531,7 +2292,11 @@ export function waitingRequests() {
 /** The teacher answered: the Request ends, and a "no" is kept for History. */
 export function answered(request: PassRequest, approve: boolean) {
   account.requests = account.requests.filter((each) => each.id !== request.id);
-  if (!approve) account.deniedRequests.push({ ...$state.snapshot(request), deniedAt: now() });
+  if (!approve)
+    account.deniedRequests.push({
+      ...$state.snapshot(request),
+      deniedAt: now(),
+    });
   save();
 }
 
@@ -1539,7 +2304,7 @@ export function markReturned(passId: string) {
   const pass = account.passes.find((each) => each.id === passId);
   if (!pass || pass.inAt) return;
   const at = now();
-  Object.assign(pass, { inAt: at, endedBy: 'teacher', updatedAt: at });
+  Object.assign(pass, { inAt: at, endedBy: "teacher", updatedAt: at });
   save();
 }
 
@@ -1551,13 +2316,13 @@ export function markReturned(passId: string) {
 export function cancelPass(passId: string, cancel: boolean) {
   const pass = account.passes.find((each) => each.id === passId);
   if (!pass) return;
-  if (cancel && pass.cancelledBy !== 'teacher') {
-    pass.endedBeforeCancel = pass.endedBy ?? 'teacher';
-    pass.endedBy = 'cancelled';
-    pass.cancelledBy = 'teacher';
+  if (cancel && pass.cancelledBy !== "teacher") {
+    pass.endedBeforeCancel = pass.endedBy ?? "teacher";
+    pass.endedBy = "cancelled";
+    pass.cancelledBy = "teacher";
     pass.inAt ??= now();
-  } else if (!cancel && pass.cancelledBy === 'teacher') {
-    pass.endedBy = pass.endedBeforeCancel ?? 'teacher';
+  } else if (!cancel && pass.cancelledBy === "teacher") {
+    pass.endedBy = pass.endedBeforeCancel ?? "teacher";
     delete pass.cancelledBy;
     delete pass.endedBeforeCancel;
   } else return;
@@ -1571,7 +2336,7 @@ export function setPassNote(passId: string, note: string) {
   const pass = account.passes.find((each) => each.id === passId);
   if (!pass) return;
   const text = note.trim();
-  if ((pass.note ?? '') === text) return;
+  if ((pass.note ?? "") === text) return;
   if (text) pass.note = text;
   else delete pass.note;
   pass.updatedAt = now();
@@ -1579,7 +2344,10 @@ export function setPassNote(passId: string, note: string) {
 }
 
 /** A Correction changes the pass in place and marks it. See docs/adr/0006. */
-export function correctPass(passId: string, changes: { student?: ClassStudent; outAt?: string; inAt?: string }) {
+export function correctPass(
+  passId: string,
+  changes: { student?: ClassStudent; outAt?: string; inAt?: string },
+) {
   const pass = account.passes.find((each) => each.id === passId);
   if (!pass) return;
   if (changes.student) {
@@ -1589,7 +2357,7 @@ export function correctPass(passId: string, changes: { student?: ClassStudent; o
   if (changes.outAt) pass.outAt = changes.outAt;
   if (changes.inAt) {
     pass.inAt = changes.inAt;
-    pass.endedBy ??= 'teacher';
+    pass.endedBy ??= "teacher";
   }
   pass.corrected = true;
   pass.updatedAt = now();
@@ -1608,7 +2376,11 @@ export function correctPass(passId: string, changes: { student?: ClassStudent; o
  * `onSchedule` when the schedule moved it.
  */
 export function setActiveClass(activeClass: ActiveClass) {
-  if (account.activeClass && account.activeClass.changedAt >= activeClass.changedAt) return;
+  if (
+    account.activeClass &&
+    account.activeClass.changedAt >= activeClass.changedAt
+  )
+    return;
   moveActiveClass(activeClass);
   save();
 }
@@ -1618,7 +2390,10 @@ function moveActiveClass(activeClass: ActiveClass) {
   // The class ending: anyone who never arrived is Absent (docs/adr/0020).
   if (leaving && leaving !== activeClass.id) markAbsences(Date.now(), true);
   if (leaving && leaving !== activeClass.id) {
-    mergeInto(account.passes, openPasses(leaving).map((pass) => endUnseen(pass, 'switch')));
+    mergeInto(
+      account.passes,
+      openPasses(leaving).map((pass) => endUnseen(pass, "switch")),
+    );
   }
   account.activeClass = activeClass;
   refreshRoom();
@@ -1643,32 +2418,37 @@ export function setPin(pin: string) {
 
 export function useThisComputer() {
   retireDevice();
-  account.kiosk = { kind: 'this-computer', locked: false };
+  account.kiosk = { kind: "this-computer", locked: false };
   save();
 }
 
 export function setDoorLocked(locked: boolean) {
-  if (account.kiosk?.kind !== 'this-computer') return;
+  if (account.kiosk?.kind !== "this-computer") return;
   account.kiosk.locked = locked;
   save();
 }
 
 export function pairDevice(kioskId: string, secret: string) {
   retireDevice();
-  account.kiosk = { kind: 'device', kioskId, secret, pairedAt: now() };
+  account.kiosk = { kind: "device", kioskId, secret, pairedAt: now() };
   account.networkBlocked = false;
   save();
 }
 
 /** A replaced device may still be holding passes; it is allowed to hand them over once. */
 function retireDevice() {
-  if (account.kiosk?.kind === 'device') {
-    account.replacedKiosks.push({ kioskId: account.kiosk.kioskId, secret: account.kiosk.secret });
+  if (account.kiosk?.kind === "device") {
+    account.replacedKiosks.push({
+      kioskId: account.kiosk.kioskId,
+      secret: account.kiosk.secret,
+    });
   }
 }
 
 export function forgetReplacedKiosk(kioskId: string) {
-  account.replacedKiosks = account.replacedKiosks.filter((each) => each.kioskId !== kioskId);
+  account.replacedKiosks = account.replacedKiosks.filter(
+    (each) => each.kioskId !== kioskId,
+  );
   save();
 }
 
@@ -1679,7 +2459,7 @@ export function removeKiosk() {
 }
 
 export function markKioskSeen() {
-  if (account.kiosk?.kind !== 'device') return;
+  if (account.kiosk?.kind !== "device") return;
   account.kiosk.lastSeenAt = now();
   write();
 }
@@ -1692,7 +2472,9 @@ export function setNetworkBlocked(blocked: boolean) {
 /** A class's code: six digits, never starting with 0, and none of this teacher's other classes has it. */
 function newRoomCode(classes: { code?: string }[] = account.classes) {
   for (;;) {
-    const code = String(100_000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900_000));
+    const code = String(
+      100_000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900_000),
+    );
     if (!classes.some((cls) => cls.code === code)) return code;
   }
 }
@@ -1758,13 +2540,18 @@ export function newClassCode(classId: string) {
 // ---------------------------------------------------------------------------
 
 export function findClaim(token: string | undefined) {
-  return token ? account.claims.find((claim) => claim.token === token) : undefined;
+  return token
+    ? account.claims.find((claim) => claim.token === token)
+    : undefined;
 }
 
 /** Makes a device act as this student. A student has at most one claimed device, so any older Claim ends. */
 export function addClaim(studentId: string) {
   const token = newId() + newId();
-  account.claims = [...account.claims.filter((claim) => claim.studentId !== studentId), { token, studentId, claimedAt: now() }];
+  account.claims = [
+    ...account.claims.filter((claim) => claim.studentId !== studentId),
+    { token, studentId, claimedAt: now() },
+  ];
   save();
   return token;
 }
@@ -1786,8 +2573,10 @@ function arrivalsOnTheDoor() {
   const marks = attendanceToday(cls.id);
   return {
     classId: cls.id,
-    studentIds: marks.filter((mark) => mark.arrivedAt).map((mark) => mark.studentId),
-    absentCount: marks.filter((mark) => mark.status === 'absent').length,
+    studentIds: marks
+      .filter((mark) => mark.arrivedAt)
+      .map((mark) => mark.studentId),
+    absentCount: marks.filter((mark) => mark.status === "absent").length,
     pinsOn: asksForPins(cls),
   };
 }
@@ -1805,7 +2594,10 @@ export function doorSetup(): DoorSetup {
       name: cls.name,
       // An Absent student is hidden from the door (docs/adr/0020).
       students: classStudents(cls)
-        .filter((student) => student.status === 'current' && !isAbsent(cls.id, student.id))
+        .filter(
+          (student) =>
+            student.status === "current" && !isAbsent(cls.id, student.id),
+        )
         .map((student) => ({
           id: student.id,
           name: displayName(student),
@@ -1818,7 +2610,10 @@ export function doorSetup(): DoorSetup {
       ...(visibilityOf(cls).where ? {} : { hideWhere: true as const }),
       ...(visibilityOf(cls).lineNames ? {} : { hideLineNames: true as const }),
     })),
-    destinations: account.limitMode === 'class' ? classLimitOnEachDestination() : account.destinations,
+    destinations:
+      account.limitMode === "class"
+        ? classLimitOnEachDestination()
+        : account.destinations,
     lineEnabled: account.lineEnabled,
     limitMode: account.limitMode,
     classLimit: account.classLimit,
@@ -1832,13 +2627,18 @@ export function doorSetup(): DoorSetup {
     passes: account.passes.filter((pass) => !pass.inAt || pass.outAt >= since),
     line: account.line,
     requests: account.requests,
-    room: account.studentLink?.open && account.studentLink.room ? { code: account.studentLink.room.code } : null,
+    room:
+      account.studentLink?.open && account.studentLink.room
+        ? { code: account.studentLink.room.code }
+        : null,
     arrivals: arrivalsOnTheDoor(),
     denied: account.deniedRequests
       .filter((request) => request.deniedAt >= minuteAgo)
       .map((request) => ({
         studentId: request.studentId,
-        secondsAgo: Math.round((Date.now() - new Date(request.deniedAt).getTime()) / 1000),
+        secondsAgo: Math.round(
+          (Date.now() - new Date(request.deniedAt).getTime()) / 1000,
+        ),
       })),
   });
 }
@@ -1864,8 +2664,10 @@ function classLimitOnEachDestination() {
  * the update, until the teacher changes a destination or the kiosk refreshes.
  */
 function forOlderKiosks() {
-  if (account.limitMode === 'class') return { passLimit: account.classLimit };
-  const limits = account.destinations.flatMap((destination) => (destination.limit === null ? [] : [destination.limit]));
+  if (account.limitMode === "class") return { passLimit: account.classLimit };
+  const limits = account.destinations.flatMap((destination) =>
+    destination.limit === null ? [] : [destination.limit],
+  );
   return { passLimit: limits.length ? Math.max(...limits) : 99 };
 }
 
@@ -1873,7 +2675,12 @@ function countedPasses() {
   const since = windowStart(account.passAllowance).toISOString();
   return account.passes
     .filter((pass) => pass.outAt >= since && passCounts(pass))
-    .map(({ id, classId, studentId, outAt }) => ({ id, classId, studentId, outAt }));
+    .map(({ id, classId, studentId, outAt }) => ({
+      id,
+      classId,
+      studentId,
+      outAt,
+    }));
 }
 
 /** The teacher closed a Popup, so it won't show again. */
@@ -1889,7 +2696,11 @@ export function markPopupsSeen(ids: string[]) {
 export function exportAccount() {
   account.lastExportedAt = now();
   save();
-  return JSON.stringify({ app: 'hallway', ...$state.snapshot(account) }, null, 2);
+  return JSON.stringify(
+    { app: "hallway", ...$state.snapshot(account) },
+    null,
+    2,
+  );
 }
 
 /**
@@ -1898,25 +2709,38 @@ export function exportAccount() {
  */
 export function importAccount(text: string, own = true) {
   const parsed = JSON.parse(text);
-  if (parsed?.app !== 'hallway' || typeof parsed.version !== 'number' || !Array.isArray(parsed.classes)) {
-    throw new Error('That file is not a Happy Hallways backup.');
+  if (
+    parsed?.app !== "hallway" ||
+    typeof parsed.version !== "number" ||
+    !Array.isArray(parsed.classes)
+  ) {
+    throw new Error("That file is not a Happy Hallways backup.");
   }
   if (parsed.version > accountVersion) {
-    throw new Error('That backup was made by a newer version of Happy Hallways. Reload this page to get the newest version, then try again.');
+    throw new Error(
+      "That backup was made by a newer version of Happy Hallways. Reload this page to get the newest version, then try again.",
+    );
   }
   delete parsed.app;
-  const restored = upgrade({ ...blankAccount(), ...fromOlderVersions, ...parsed });
+  const restored = upgrade({
+    ...blankAccount(),
+    ...fromOlderVersions,
+    ...parsed,
+  });
   restored.version = accountVersion;
   if (!own) {
     // Someone else's backup: their classes and passes, but not their kiosk, laptop address, Room or students' devices.
     restored.laptopPeerId = `hallway-${newId()}`;
     restored.kiosk = null;
     restored.replacedKiosks = [];
-    restored.studentLink = restored.studentLink ? { open: false, room: null } : null;
+    restored.studentLink = restored.studentLink
+      ? { open: false, room: null }
+      : null;
     restored.claims = [];
     // Their students know those codes: this teacher's classes get their own.
     for (const cls of restored.classes) delete cls.code;
-    for (const cls of restored.classes) cls.code = newRoomCode(restored.classes);
+    for (const cls of restored.classes)
+      cls.code = newRoomCode(restored.classes);
   }
   // Whatever this computer's older copy holds isn't part of the backup, so it's never folded into it.
   const legacy = localStorage.getItem(legacyKey);

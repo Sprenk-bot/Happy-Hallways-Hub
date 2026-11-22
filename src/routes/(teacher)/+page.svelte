@@ -3,14 +3,20 @@
   import {
     account,
     activeClassLabel,
+    classStudents,
+    cancelHubVisitNotification,
+    confirmArrivedBackAtClass,
     createClass,
     findClass,
     findSchedule,
     liveSchedule,
+    leaveHub,
     markReturned,
+    notifyHubVisit,
     moveWarning,
     noPassNow,
     openPasses,
+    recordHubArrival,
     removeKiosk,
     passStatus,
     passStatusIcon,
@@ -21,8 +27,10 @@
     useSchedule,
     useThisComputer,
     useWarning,
+    hubVisitStatus,
   } from '#lib/account.svelte.ts';
   import { clock } from '#lib/clock.svelte.ts';
+  import { playHubChime, prepareHubAudio } from '../../lib/sound';
   import ConfirmDialog from '#lib/ConfirmDialog.svelte';
   import DestinationIcon from '#lib/DestinationIcon.svelte';
   import Icon from '#lib/Icon.svelte';
@@ -33,13 +41,22 @@
   import QuietScene, { seasons, type Season } from '#lib/QuietScene.svelte';
   import { page } from '$app/state';
   import { currentRoom, devicesText, studentLink, studentLinkUrl } from '#lib/studentLink.svelte.ts';
+  import {
+    clearStaffPreferences,
+    loadStaffPreferences,
+    staffPreferences,
+    toggleFavouriteStudent,
+  } from '#lib/staff-preferences.svelte.ts';
   import RoomBoard from '#lib/RoomBoard.svelte';
   import StartPassDialog from '#lib/StartPassDialog.svelte';
   import { perform, startPassFromHome } from '#lib/door.svelte.ts';
   import RoomCode from '#lib/RoomCode.svelte';
   import { popOutRoom } from '#lib/popOut.ts';
+  import type { HubVisitCancellationReason } from '#lib/types.ts';
   import { duration, hasRealDuration, isOverdue, now, time } from '#lib/passes.ts';
   import { nextClassPeriod, periodAt, toMinutes } from '#lib/schedule.ts';
+  import { flushHubSaves, hubRuntime } from '#lib/hub-runtime.svelte.ts';
+  import { hubMail, loadMailRecipients, sendHubConcern } from '#lib/hub-mail.svelte.ts';
 
   /**
    * Home: the one page a teacher keeps open all day. The day and whether
@@ -52,6 +69,43 @@
 
   const at = $derived(clock.now);
   const classId = $derived(account.activeClass?.id ?? null);
+  const classRoster = $derived(
+    classStudents(findClass(classId)).filter((student) => student.status === 'current'),
+  );
+  const filteredHubStudents = $derived.by(() => {
+    const query = hubStudentSearch.trim().toLocaleLowerCase();
+    return classRoster.filter((student) => {
+      if (hubYearGroup === 'unassigned' && student.categoryId) return false;
+      if (hubYearGroup && hubYearGroup !== 'unassigned' && student.categoryId !== hubYearGroup) return false;
+      const category = account.studentCategories.find((each) => each.id === student.categoryId)?.name ?? '';
+      const name = `${student.firstName} ${student.lastName ?? student.lastPrefix}`.toLocaleLowerCase();
+      return !query || name.includes(query) || category.toLocaleLowerCase().includes(query);
+    });
+  });
+  const favouriteHubStudents = $derived(
+    filteredHubStudents.filter((student) => staffPreferences.favouriteStudentIds.includes(student.id)),
+  );
+  const otherHubStudents = $derived(
+    filteredHubStudents.filter((student) => !staffPreferences.favouriteStudentIds.includes(student.id)),
+  );
+  const selectedHubStudent = $derived(classRoster.find((student) => student.id === hubStudentId) ?? null);
+  const selectedHubStudentIsFavourite = $derived(
+    !!selectedHubStudent && staffPreferences.favouriteStudentIds.includes(selectedHubStudent.id),
+  );
+  const hubDestinations = $derived(account.destinations.filter((destination) => destination.informHubAvailable));
+  const currentHubVisits = $derived(
+    account.hubVisits
+      .filter(
+        (visit) =>
+          !visit.arrivedBackAtClassAt &&
+          (!visit.cancelledAt || visit.classId === classId),
+      )
+      .sort((a, b) =>
+        (b.leftClassAt ?? b.arrivedAtHubAt ?? '').localeCompare(
+          a.leftClassAt ?? a.arrivedAtHubAt ?? '',
+        ),
+      ),
+  );
   const live = $derived(liveSchedule());
   const status = $derived(passStatus(at));
   const noPass = $derived(classId ? noPassNow(classId, at) : null);
@@ -218,6 +272,334 @@
    */
   const quiet = () => {};
   let startingPass = $state(false);
+  let hubStudentId = $state('');
+  let hubStudentSearch = $state('');
+  let hubYearGroup = $state('');
+  let hubDestinationId = $state('');
+  let hubConcernChoice = $state<'no-concerns' | 'concern'>('no-concerns');
+  let hubConcernNote = $state('');
+  let hubConcernScope = $state<'tic' | 'all-staff' | 'selected'>('tic');
+  let hubConcernRecipientIds = $state<string[]>([]);
+  let pendingConcern = $state<{
+    visitId: string;
+    note: string;
+    scope: 'tic' | 'all-staff' | 'selected';
+    recipientIds: string[];
+  } | null>(null);
+  let hubNoticeState = $state<'idle' | 'saving' | 'saved' | 'pending' | 'error'>('idle');
+  let hubNoticeMessage = $state('');
+  let pendingHubSuccessMessage = '';
+
+  $effect(() => {
+    if (!hubRuntime.hosted || (hubRuntime.session && ['ready', 'no-data'].includes(hubRuntime.status))) {
+      void loadStaffPreferences();
+    } else if (hubRuntime.status === 'signed-out') {
+      clearStaffPreferences();
+    }
+  });
+
+  let recipientsLoadedFor = '';
+  $effect(() => {
+    const staffId = hubRuntime.session?.staffId ?? '';
+    if (hubRuntime.hosted && hubRuntime.status === 'ready' && staffId && recipientsLoadedFor !== staffId) {
+      recipientsLoadedFor = staffId;
+      void loadMailRecipients();
+    } else if (hubRuntime.status === 'signed-out') {
+      recipientsLoadedFor = '';
+    }
+  });
+
+  let appliedConcernPolicyAt = '';
+  $effect(() => {
+    const policy = hubMail.concernPolicy;
+    if (hubMail.concernPolicyLoaded && policy.updatedAt !== appliedConcernPolicyAt) {
+      appliedConcernPolicyAt = policy.updatedAt;
+      hubConcernScope = policy.defaultScope;
+    }
+  });
+
+  $effect(() => {
+    if (hubStudentId && !filteredHubStudents.some((student) => student.id === hubStudentId)) {
+      hubStudentId = '';
+    }
+  });
+
+  $effect(() => {
+    if (
+      hubNoticeState === 'pending' &&
+      hubRuntime.hosted &&
+      hubRuntime.status === 'ready' &&
+      hubRuntime.saveStatus === 'saved'
+    ) {
+      hubNoticeState = 'saved';
+      hubNoticeMessage = pendingHubSuccessMessage;
+      pendingHubSuccessMessage = '';
+    }
+  });
+
+  async function informHub(event: SubmitEvent) {
+    event.preventDefault();
+    if (hubNoticeState === 'saving') return;
+
+    if (pendingConcern) {
+      await deliverPendingConcern();
+      return;
+    }
+    if (!classId) return;
+
+    const cls = findClass(classId);
+    const student = classRoster.find((each) => each.id === hubStudentId);
+    if (!cls || !student || !hubDestinations.some((each) => each.id === hubDestinationId)) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = 'Choose a current student and an enabled destination.';
+      return;
+    }
+
+    const concern = hubConcernChoice === 'concern';
+    if (concern) {
+      if (!hubRuntime.hosted || !hubRuntime.session) {
+        hubNoticeState = 'error';
+        hubNoticeMessage = 'Connect to the Hub Host before sending a private concern note.';
+        return;
+      }
+      if (!hubConcernNote.trim() || hubConcernNote.length > 2000) {
+        hubNoticeState = 'error';
+        hubNoticeMessage = 'Enter a concern note of up to 2000 characters.';
+        return;
+      }
+      if (hubConcernScope === 'selected' && !hubConcernRecipientIds.length) {
+        hubNoticeState = 'error';
+        hubNoticeMessage = 'Choose at least one staff member to receive this concern.';
+        return;
+      }
+    }
+
+    try {
+      const visitId = notifyHubVisit({
+        studentId: student.id,
+        destinationId: hubDestinationId,
+        classId: cls.id,
+        className: cls.name,
+        ...(concern ? { hasConcern: true } : {}),
+      });
+      if (concern) {
+        pendingConcern = {
+          visitId,
+          note: hubConcernNote.trim(),
+          scope: hubConcernScope,
+          recipientIds: hubConcernScope === 'selected' ? [...hubConcernRecipientIds] : [],
+        };
+      }
+      const saved = await waitForHubSave(
+        hubRuntime.hosted ? 'Saved to the Hub Host.' : 'Notification saved on this computer.',
+      );
+      if (saved && pendingConcern) await deliverPendingConcern();
+    } catch (error) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = error instanceof Error ? error.message : 'The notification could not be saved.';
+    }
+  }
+
+  async function deliverPendingConcern() {
+    if (!pendingConcern) return;
+    if (!hubMail.concernPolicyLoaded || hubMail.concernPolicyError) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = hubMail.concernPolicyError || 'Concern routing settings are not confirmed by the Hub Host.';
+      return;
+    }
+    if (!hubConcernNote.trim() || hubConcernNote.length > 2000) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = 'Enter a concern note of up to 2000 characters.';
+      return;
+    }
+    if (
+      !hubMail.concernPolicy.availableScopes.includes(hubConcernScope) ||
+      (hubConcernScope === 'selected' && !hubConcernRecipientIds.length)
+    ) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = 'Choose a route and any required recipients allowed by the current TIC policy.';
+      return;
+    }
+
+    const concern = {
+      ...pendingConcern,
+      note: hubConcernNote.trim(),
+      scope: hubConcernScope,
+      recipientIds: hubConcernScope === 'selected' ? [...hubConcernRecipientIds] : [],
+    };
+    const saved = await flushHubSaves();
+    if (!saved) {
+      hubNoticeState = hubRuntime.status === 'conflict' || hubRuntime.saveStatus === 'forbidden' ? 'error' : 'pending';
+      hubNoticeMessage = hubRuntime.message || 'The movement is not yet confirmed by the Hub Host. The concern note has not been sent; retry after reconnecting.';
+      return;
+    }
+
+    hubNoticeState = 'saving';
+    hubNoticeMessage = '';
+    try {
+      const savedMessage = await sendHubConcern(concern);
+      const recipientsMatch =
+        concern.scope !== 'selected' ||
+        (savedMessage.recipients.length === concern.recipientIds.length &&
+          concern.recipientIds.every((staffId) =>
+            savedMessage.recipients.some((recipient) => recipient.staffId === staffId),
+          ));
+      if (
+        savedMessage.note !== concern.note ||
+        savedMessage.scope !== concern.scope ||
+        !recipientsMatch
+      ) {
+        throw new Error('A concern for this movement was already saved with its original note and recipients. Check the Mail Centre before retrying.');
+      }
+      pendingConcern = null;
+      hubConcernChoice = 'no-concerns';
+      hubConcernNote = '';
+      hubConcernRecipientIds = [];
+      hubNoticeState = 'saved';
+      hubNoticeMessage = 'The movement and private concern note were saved to the Hub Host.';
+    } catch (error) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = error instanceof Error
+        ? `The movement was saved, but its concern note was not confirmed. Retry concern delivery: ${error.message}`
+        : 'The movement was saved, but its concern note was not confirmed. Retry concern delivery.';
+    }
+  }
+
+  async function confirmHubReturn(visitId: string) {
+    if (hubNoticeState === 'saving') return;
+    prepareHubAudio();
+    try {
+      confirmArrivedBackAtClass(visitId);
+      const acknowledged = await waitForHubSave(
+        hubRuntime.hosted ? 'Return confirmation saved to the Hub Host.' : 'Return confirmation saved on this computer.',
+      );
+      const settings = account.hubKioskSoundSettings;
+      if (acknowledged && settings && !settings.muted) {
+        playHubChime(settings.commonChime, settings.volume);
+      }
+    } catch (error) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = error instanceof Error ? error.message : 'The return confirmation could not be saved.';
+    }
+  }
+
+  async function confirmHubArrival(visitId: string) {
+    if (hubNoticeState === 'saving') return;
+    try {
+      recordHubArrival(visitId);
+      await waitForHubSave(
+        hubRuntime.hosted
+          ? 'Hub arrival saved to the Hub Host.'
+          : 'Hub arrival saved on this computer.',
+      );
+    } catch (error) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = error instanceof Error
+        ? error.message
+        : 'The Hub arrival could not be saved.';
+    }
+  }
+
+  async function confirmHubDeparture(visitId: string) {
+    if (hubNoticeState === 'saving') return;
+    try {
+      leaveHub(visitId);
+      await waitForHubSave(
+        hubRuntime.hosted
+          ? 'Hub departure saved to the Hub Host.'
+          : 'Hub departure saved on this computer.',
+      );
+    } catch (error) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = error instanceof Error
+        ? error.message
+        : 'The Hub departure could not be saved.';
+    }
+  }
+
+  function requestHubDeparture(visitId: string) {
+    confirming = {
+      title: 'Confirm the student has left the Hub?',
+      message: 'This closes the Main Hub Visit. It does not confirm that the student has returned to class.',
+      label: 'Confirm left Hub',
+      run: () => void confirmHubDeparture(visitId),
+    };
+  }
+
+  async function cancelHubMovement(
+    visitId: string,
+    reason: HubVisitCancellationReason,
+  ) {
+    if (hubNoticeState === 'saving') return;
+    try {
+      cancelHubVisitNotification(visitId, reason);
+      await waitForHubSave(
+        hubRuntime.hosted
+          ? 'Hub notification cancellation saved to the Hub Host.'
+          : 'Hub notification cancellation saved on this computer.',
+      );
+    } catch (error) {
+      hubNoticeState = 'error';
+      hubNoticeMessage = error instanceof Error
+        ? error.message
+        : 'The Hub notification could not be cancelled.';
+    }
+  }
+
+  function requestHubMovementCancellation(
+    visitId: string,
+    reason: HubVisitCancellationReason,
+  ) {
+    const didNotArrive = reason === 'did-not-arrive';
+    confirming = {
+      title: didNotArrive ? 'Mark as did not arrive?' : 'Cancel this notification?',
+      message: didNotArrive
+        ? 'This closes the classroom notification without recording an arrival or completed visit. The movement remains in History.'
+        : 'This withdraws the classroom notification without recording an arrival or completed visit. The movement remains in History.',
+      label: didNotArrive ? 'Mark did not arrive' : 'Cancel notification',
+      run: () => void cancelHubMovement(visitId, reason),
+    };
+  }
+
+  async function waitForHubSave(successMessage: string) {
+    pendingHubSuccessMessage = '';
+    hubNoticeState = 'saving';
+    hubNoticeMessage = '';
+    const acknowledged = await flushHubSaves();
+    if (acknowledged) {
+      hubNoticeState = 'saved';
+      hubNoticeMessage = successMessage;
+    } else if (hubRuntime.status === 'conflict' || hubRuntime.saveStatus === 'forbidden') {
+      hubNoticeState = 'error';
+      hubNoticeMessage = hubRuntime.message || 'The Hub Host did not accept this action.';
+    } else {
+      hubNoticeState = 'pending';
+      pendingHubSuccessMessage = successMessage;
+      hubNoticeMessage = 'Pending: the Hub Host has not confirmed this action. Reconnect before relying on it.';
+    }
+    return acknowledged;
+  }
+
+  function hubStatusText(visit: (typeof account.hubVisits)[number]) {
+    const status = hubVisitStatus(visit);
+    if (status === 'on-the-way') return 'On the way to the Hub';
+    if (status === 'at-hub') return 'At the Hub';
+    if (status === 'on-temporary-trip') return 'On a Temporary Trip';
+    if (status === 'cancelled') return 'Notification withdrawn';
+    if (status === 'did-not-arrive') return 'Did not arrive';
+    if (status === 'returned-to-class') return 'Returned to class';
+    return 'Left the Hub; return to class not confirmed';
+  }
+
+  function needsPeriodTransitionReview(visit: (typeof account.hubVisits)[number]) {
+    return (
+      !visit.arrivedBackAtClassAt &&
+      !visit.cancelledAt &&
+      !!visit.classId &&
+      visit.classId !== classId
+    );
+  }
+
   function removeFromLine(studentId: string) {
     perform({ kind: 'leave', studentId }, quiet);
   }
@@ -366,6 +748,228 @@
               </ol>
             </div>
           {/each}
+        </section>
+
+        <section class="card hub-card" aria-labelledby="inform-hub-title">
+          <div class="right-now-head">
+            <h2 id="inform-hub-title">Inform the Hub</h2>
+          </div>
+          {#if hubDestinations.length && classRoster.length}
+            <form class="hub-form" onsubmit={informHub}>
+              <div class="hub-student-filters">
+                <label class="field">
+                  Search students
+                  <input aria-label="Search Hub students" type="search" bind:value={hubStudentSearch} placeholder="Name or year group" disabled={!!pendingConcern} />
+                </label>
+                <label class="field">
+                  Filter by year group
+                  <select aria-label="Filter Hub students by year group" bind:value={hubYearGroup} disabled={!!pendingConcern}>
+                    <option value="">All year groups</option>
+                    <option value="unassigned">No year group</option>
+                    {#each account.studentCategories as category (category.id)}
+                      <option value={category.id}>{category.name}</option>
+                    {/each}
+                  </select>
+                </label>
+              </div>
+              <div class="field">
+                <label for="hub-student">Student</label>
+                <select id="hub-student" bind:value={hubStudentId} aria-label="Student to notify" required disabled={!!pendingConcern}>
+                  <option value="" disabled>Choose a student</option>
+                  {#if favouriteHubStudents.length}
+                    <optgroup label="Favourites">
+                      {#each favouriteHubStudents as student (student.id)}
+                        <option value={student.id}>{student.firstName} {student.lastName || `${student.lastPrefix}.`}</option>
+                      {/each}
+                    </optgroup>
+                  {/if}
+                  {#if otherHubStudents.length}
+                    <optgroup label="All current students">
+                      {#each otherHubStudents as student (student.id)}
+                        <option value={student.id}>{student.firstName} {student.lastName || `${student.lastPrefix}.`}</option>
+                      {/each}
+                    </optgroup>
+                  {/if}
+                  {#if !filteredHubStudents.length}
+                    <option value="" disabled>No students match these filters</option>
+                  {/if}
+                </select>
+                {#if selectedHubStudent && staffPreferences.loaded}
+                  <button
+                    class="btn btn-small btn-quiet favourite-toggle"
+                    type="button"
+                    aria-label="{selectedHubStudentIsFavourite ? 'Remove' : 'Add'} {selectedHubStudent.firstName} {selectedHubStudent.lastName || `${selectedHubStudent.lastPrefix}.`} {selectedHubStudentIsFavourite ? 'from' : 'to'} favourites"
+                    aria-pressed={selectedHubStudentIsFavourite}
+                    disabled={staffPreferences.saving || !!pendingConcern}
+                    onclick={() => toggleFavouriteStudent(selectedHubStudent!.id)}
+                  >
+                    <Icon name="star" size={14} />
+                    {selectedHubStudentIsFavourite ? 'Remove favourite' : 'Add to favourites'}
+                  </button>
+                {/if}
+              </div>
+              <label class="field">
+                Destination
+                <select bind:value={hubDestinationId} aria-label="Hub destination" required disabled={!!pendingConcern}>
+                  <option value="" disabled>Choose a destination</option>
+                  {#each hubDestinations as destination (destination.id)}
+                    <option value={destination.id}>{destination.label}</option>
+                  {/each}
+                </select>
+              </label>
+              <fieldset class="hub-concern-choice">
+                <legend>Concern status</legend>
+                <label>
+                  <input type="radio" name="hub-concern" value="no-concerns" bind:group={hubConcernChoice} disabled={!!pendingConcern} />
+                  No Concerns
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="hub-concern"
+                    value="concern"
+                    bind:group={hubConcernChoice}
+                    disabled={!!pendingConcern || !hubRuntime.hosted || hubRuntime.status !== 'ready' || !hubMail.concernPolicyLoaded || !!hubMail.concernPolicyError}
+                  />
+                  Concern
+                </label>
+                {#if !hubRuntime.hosted}
+                  <p class="muted small">Private concern notes require the Hub Host. Browser-only mode can send No Concerns notifications.</p>
+                {:else if hubMail.concernPolicyError}
+                  <p class="small error" role="alert">{hubMail.concernPolicyError}</p>
+                {:else if !hubMail.concernPolicyLoaded}
+                  <p class="muted small" role="status">Loading TIC concern-routing policy…</p>
+                {:else if hubConcernChoice === 'concern'}
+                  <div class="hub-concern-fields">
+                    <label class="field" for="hub-concern-note">
+                      Brief explanation
+                      <textarea
+                        id="hub-concern-note"
+                        bind:value={hubConcernNote}
+                        maxlength="2000"
+                        rows="3"
+                        required
+                        placeholder="Share only relevant context for the selected staff."
+                      ></textarea>
+                    </label>
+                    <fieldset class="hub-concern-routing">
+                      <legend>Who should receive this note?</legend>
+                      {#if hubMail.concernPolicy.availableScopes.includes('tic')}
+                        <label><input type="radio" name="hub-concern-scope" value="tic" bind:group={hubConcernScope} /> TIC only{hubMail.concernPolicy.defaultScope === 'tic' ? ' (default)' : ''}</label>
+                      {/if}
+                      {#if hubMail.concernPolicy.availableScopes.includes('all-staff')}
+                        <label><input type="radio" name="hub-concern-scope" value="all-staff" bind:group={hubConcernScope} /> All staff{hubMail.concernPolicy.defaultScope === 'all-staff' ? ' (default)' : ''}</label>
+                      {/if}
+                      {#if hubMail.concernPolicy.availableScopes.includes('selected')}
+                        <label><input type="radio" name="hub-concern-scope" value="selected" bind:group={hubConcernScope} /> Choose staff{hubMail.concernPolicy.defaultScope === 'selected' ? ' (default)' : ''}</label>
+                      {/if}
+                      {#if hubConcernScope === 'selected'}
+                        {#if hubMail.recipientsError}
+                          <p class="small error" role="alert">{hubMail.recipientsError}</p>
+                        {:else if !hubMail.recipientsLoaded}
+                          <p class="muted small" role="status">Loading authorised staff profiles…</p>
+                        {:else}
+                          <div class="hub-recipient-list">
+                            {#each hubMail.recipients as recipient (recipient.staffId)}
+                              <label>
+                                <input type="checkbox" bind:group={hubConcernRecipientIds} value={recipient.staffId} />
+                                {recipient.displayName} ({recipient.role.toUpperCase()})
+                              </label>
+                            {/each}
+                          </div>
+                        {/if}
+                      {/if}
+                    </fieldset>
+                    <p class="muted small">The note is visible to you, TIC and the selected recipients. Other staff see only a concern warning indicator.</p>
+                  </div>
+                {/if}
+              </fieldset>
+              <button
+                class="btn btn-primary"
+                disabled={(!pendingConcern && (!hubStudentId || !hubDestinationId)) || hubNoticeState === 'saving'}
+              >
+                <Icon name="arrow-right" size={14} />
+                {hubNoticeState === 'saving' ? 'Saving…' : pendingConcern ? 'Retry concern delivery' : 'Send notification'}
+              </button>
+            </form>
+            {#if staffPreferences.error}
+              <p class="small hub-notice error" role="alert">{staffPreferences.error}</p>
+            {:else if !staffPreferences.loaded}
+              <p class="muted small" role="status">Loading personal favourites…</p>
+            {:else if !hubRuntime.hosted}
+              <p class="muted small">Favourites are saved in this browser.</p>
+            {/if}
+          {:else if !classRoster.length}
+            <p class="muted small">Add current students to this class before sending a Hub notification.</p>
+          {:else if !hubRuntime.hosted || hubRuntime.session?.role === 'tic'}
+            <p class="muted small">
+              No destinations are enabled yet.
+              <a href="/destinations">Choose destinations available in Inform the Hub</a>.
+            </p>
+          {:else}
+            <p class="muted small">No destinations are enabled for Inform the Hub. Ask the TIC to configure them.</p>
+          {/if}
+          {#if hubNoticeMessage}
+            <p class="small hub-notice" class:saved={hubNoticeState === 'saved'} class:pending={hubNoticeState === 'pending'} class:error={hubNoticeState === 'error'} role="status">
+              {hubNoticeMessage}
+            </p>
+          {/if}
+          {#if currentHubVisits.length}
+            <ul class="hub-visits">
+              {#each currentHubVisits as visit (visit.id)}
+                <li>
+                  <span>
+                    {#if visit.hasConcern}
+                      <Icon name="alert-triangle" size={15} />
+                      <span class="sr-only">A concern is recorded; private details are in the Mail Centre.</span>
+                    {/if}
+                    <strong>{visit.studentName}</strong>
+                    {#if needsPeriodTransitionReview(visit)}
+                      <span class="muted small">
+                        · {visit.className ?? visit.periodName ?? 'Previous class'}
+                      </span>
+                    {/if}
+                    <span class="muted small"> · {visit.destinationLabel} · {time(visit.leftClassAt ?? visit.arrivedAtHubAt ?? '')}</span>
+                  </span>
+                  <span class="hub-visit-actions">
+                    {#if needsPeriodTransitionReview(visit)}
+                      <span class="badge">Period transition review</span>
+                    {/if}
+                    <span class="badge">{hubStatusText(visit)}</span>
+                    {#if hubVisitStatus(visit) === 'left-hub-awaiting-class'}
+                      <button
+                        class="btn btn-small"
+                        disabled={hubNoticeState === 'saving'}
+                        onclick={() => confirmHubReturn(visit.id)}
+                      >Confirm back in class</button>
+                    {:else if hubVisitStatus(visit) === 'on-the-way'}
+                      <button
+                        class="btn btn-small"
+                        disabled={hubNoticeState === 'saving'}
+                        onclick={() => confirmHubArrival(visit.id)}
+                      >Confirm arrived at Hub</button>
+                      <button
+                        class="btn btn-quiet btn-small"
+                        disabled={hubNoticeState === 'saving'}
+                        onclick={() => requestHubMovementCancellation(visit.id, 'withdrawn')}
+                      >Cancel notification</button>
+                      <button
+                        class="btn btn-quiet btn-small"
+                        disabled={hubNoticeState === 'saving'}
+                        onclick={() => requestHubMovementCancellation(visit.id, 'did-not-arrive')}
+                      >Mark did not arrive</button>
+                    {:else if hubVisitStatus(visit) === 'at-hub'}
+                      <button
+                        class="btn btn-small"
+                        disabled={hubNoticeState === 'saving'}
+                        onclick={() => requestHubDeparture(visit.id)}
+                      >Confirm left Hub</button>
+                    {/if}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </section>
 
         <section class="this-class-log">
@@ -527,6 +1131,136 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+  }
+
+  .hub-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 12px;
+  }
+
+  .hub-concern-choice,
+  .hub-concern-routing {
+    min-width: 0;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  .hub-concern-choice {
+    display: grid;
+    grid-column: 1 / -1;
+    gap: 8px;
+  }
+
+  .hub-concern-choice > label,
+  .hub-concern-routing > label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .hub-concern-choice input,
+  .hub-concern-routing input {
+    margin: 0;
+  }
+
+  .hub-concern-fields {
+    display: grid;
+    gap: 10px;
+    padding-top: 4px;
+  }
+
+  .hub-concern-fields textarea {
+    width: 100%;
+    resize: vertical;
+  }
+
+  .hub-concern-routing {
+    display: grid;
+    gap: 8px;
+  }
+
+  .hub-recipient-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+    max-height: 180px;
+    overflow: auto;
+    padding: 4px;
+  }
+
+  .hub-recipient-list label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .hub-visits li > span:first-child {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .hub-student-filters {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .favourite-toggle {
+    margin-top: 8px;
+  }
+
+  .hub-visits {
+    display: grid;
+    gap: 8px;
+    margin: 16px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .hub-visits li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .hub-visit-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .hub-notice {
+    margin: 12px 0 0;
+  }
+
+  .hub-notice.saved {
+    color: var(--live);
+  }
+
+  .hub-notice.pending,
+  .hub-notice.error {
+    color: var(--warn);
+  }
+
+  @media (max-width: 720px) {
+    .hub-form {
+      grid-template-columns: 1fr;
+    }
+
+    .hub-student-filters {
+      grid-template-columns: 1fr;
+    }
   }
 
   .who {

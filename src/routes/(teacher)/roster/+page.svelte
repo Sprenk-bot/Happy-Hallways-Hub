@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { replaceState } from '$app/navigation';
-  import { account, classesOf, dismissMerge, dismissRosterMerge, findStudent, mergeStudents, setStudentPins, undoMerge } from '#lib/account.svelte.ts';
+  import { account, addStudentCategory, classesOf, dismissMerge, dismissRosterMerge, findStudent, mergeStudents, removeStudentCategory, setStudentPins, undoMerge, updateStudentCategory } from '#lib/account.svelte.ts';
   import Modal from '#lib/Modal.svelte';
   import type { MergeSuggestion } from '#lib/merge.ts';
   import { shortDate } from '#lib/passes.ts';
@@ -9,6 +9,7 @@
   import Icon from '#lib/Icon.svelte';
   import { mergeSuggestions } from '#lib/merge.ts';
   import { minutesOut, startOfWeek } from '#lib/stats.ts';
+  import { destinationColors, type DestinationColor } from '#lib/destinations.ts';
   import type { Student } from '#lib/types.ts';
 
   /**
@@ -34,6 +35,16 @@
     dismissRosterMerge();
   }
   let showPins = $state(false);
+  let showCategoryManager = $state(false);
+  let search = $state('');
+  let categoryFilter = $state('');
+  let sortBy = $state<'name' | 'category'>('name');
+  let newCategoryName = $state('');
+  let newCategoryColor = $state<DestinationColor>('blue');
+  let categoryError = $state('');
+  const categoryColors = Object.keys(destinationColors) as DestinationColor[];
+  const isCategoryColor = (value: string): value is DestinationColor =>
+    categoryColors.some((color) => color === value);
   /** A class page links here with ?student=, to edit that student. */
   let editing = $state<Student | null>(findStudent(page.url.searchParams.get('student') ?? undefined) ?? null);
 
@@ -53,14 +64,70 @@
     return account.roster
       .map((student) => {
         const mine = thisWeek.filter((pass) => pass.studentId === student.id);
-        return { student, name: nameOf(student), classes: classesOf(student.id), week: mine.length, minutesWeek: minutesOut(mine) };
+        const category = account.studentCategories.find((each) => each.id === student.categoryId);
+        return { student, name: nameOf(student), classes: classesOf(student.id), category, week: mine.length, minutesWeek: minutesOut(mine) };
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        if (sortBy === 'category') {
+          const aOrder = a.category ? account.studentCategories.indexOf(a.category) : Number.MAX_SAFE_INTEGER;
+          const bOrder = b.category ? account.studentCategories.indexOf(b.category) : Number.MAX_SAFE_INTEGER;
+          if (aOrder !== bOrder) return aOrder - bOrder;
+        }
+        return a.name.localeCompare(b.name);
+      });
   });
+  const visibleRows = $derived(rows.filter((row) => {
+    if (categoryFilter === 'unassigned' && row.category) return false;
+    if (categoryFilter && categoryFilter !== 'unassigned' && row.student.categoryId !== categoryFilter) return false;
+    const query = search.trim().toLocaleLowerCase();
+    return !query || [row.name, row.category?.name ?? '', ...row.classes].some((value) => value.toLocaleLowerCase().includes(query));
+  }));
   const totals = $derived({
-    week: rows.reduce((sum, row) => sum + row.week, 0),
-    minutesWeek: rows.reduce((sum, row) => sum + row.minutesWeek, 0),
+    week: visibleRows.reduce((sum, row) => sum + row.week, 0),
+    minutesWeek: visibleRows.reduce((sum, row) => sum + row.minutesWeek, 0),
   });
+
+  function addCategory() {
+    categoryError = '';
+    try {
+      addStudentCategory(newCategoryName, newCategoryColor);
+      newCategoryName = '';
+    } catch (error) {
+      categoryError = error instanceof Error ? error.message : 'The year group could not be added.';
+    }
+  }
+
+  function renameCategory(id: string, input: HTMLInputElement) {
+    const category = account.studentCategories.find((each) => each.id === id);
+    if (!category) return;
+    categoryError = '';
+    try {
+      updateStudentCategory(id, { name: input.value, color: category.color });
+    } catch (error) {
+      categoryError = error instanceof Error ? error.message : 'The year group could not be renamed.';
+      input.value = category.name;
+    }
+  }
+
+  function recolorCategory(id: string, color: string) {
+    const category = account.studentCategories.find((each) => each.id === id);
+    if (!category) return;
+    if (!isCategoryColor(color)) {
+      categoryError = 'Choose a listed colour.';
+      return;
+    }
+    categoryError = '';
+    updateStudentCategory(id, { name: category.name, color });
+  }
+
+  function deleteCategory(id: string) {
+    categoryError = '';
+    try {
+      removeStudentCategory(id);
+    } catch (error) {
+      categoryError = error instanceof Error ? error.message : 'The year group could not be removed.';
+    }
+  }
 </script>
 
 <svelte:head>
@@ -78,7 +145,50 @@
         letters. That first name can be a nickname, the name students know them by.
       </p>
     </div>
+    <button class="btn btn-small" aria-expanded={showCategoryManager} onclick={() => (showCategoryManager = !showCategoryManager)}>
+      {showCategoryManager ? 'Close year groups' : 'Manage year groups'}
+    </button>
   </header>
+
+  {#if showCategoryManager}
+    <section class="card category-manager" aria-labelledby="category-manager-title">
+      <div>
+        <h2 id="category-manager-title">Year groups</h2>
+        <p class="muted small">Rename or recolour groups to fit your school. Existing students are unassigned until you choose a group.</p>
+      </div>
+      <form class="category-add" onsubmit={(event) => { event.preventDefault(); addCategory(); }}>
+        <label class="field">New year group <input aria-label="New year group" bind:value={newCategoryName} /></label>
+        <label class="field">Colour
+          <select aria-label="New year group colour" bind:value={newCategoryColor}>
+            {#each categoryColors as color (color)}
+              <option value={color}>{color}</option>
+            {/each}
+          </select>
+        </label>
+        <button class="btn btn-primary btn-small" disabled={!newCategoryName.trim()}>Add year group</button>
+      </form>
+      {#if categoryError}<p class="form-error" role="alert">{categoryError}</p>{/if}
+      <ul class="category-list">
+        {#each account.studentCategories as category (category.id)}
+          {@const assigned = account.roster.filter((student) => student.categoryId === category.id).length}
+          <li>
+            <label class="field">Name
+              <input aria-label="Name for {category.name}" value={category.name} onchange={(event) => renameCategory(category.id, event.currentTarget)} />
+            </label>
+            <label class="field">Colour
+              <select aria-label="Colour for {category.name}" value={category.color} onchange={(event) => recolorCategory(category.id, event.currentTarget.value)}>
+                {#each categoryColors as color (color)}
+                  <option value={color}>{color}</option>
+                {/each}
+              </select>
+            </label>
+            <span class="muted small">{assigned} {assigned === 1 ? 'student' : 'students'}</span>
+            <button class="btn btn-small btn-quiet" aria-label="Remove {category.name}" disabled={assigned > 0} title={assigned ? 'Reassign students before removing this group.' : undefined} onclick={() => deleteCategory(category.id)}>Remove</button>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   {#if suggestions.length}
     <section class="card" aria-labelledby="merge-title">
@@ -166,11 +276,32 @@
   <section class="card table-card">
     {#if rows.length}
       <!-- The card holds only the table, so the column headers sit right at its top. -->
+      <div class="roster-filters">
+        <label class="field">Search students
+          <input aria-label="Search students" type="search" bind:value={search} placeholder="Name, class or year group" />
+        </label>
+        <label class="field">Filter by year group
+          <select aria-label="Filter by year group" bind:value={categoryFilter}>
+            <option value="">All year groups</option>
+            {#each account.studentCategories as category (category.id)}
+              <option value={category.id}>{category.name}</option>
+            {/each}
+            <option value="unassigned">Unassigned</option>
+          </select>
+        </label>
+        <label class="field">Sort by
+          <select aria-label="Sort students by" bind:value={sortBy}>
+            <option value="name">Name</option>
+            <option value="category">Year group</option>
+          </select>
+        </label>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
               <th>Student</th>
+              <th>Year group</th>
               <th>Classes</th>
               {#if account.studentPins}<th>PIN</th>{/if}
               <th class="num">This week</th>
@@ -179,11 +310,16 @@
             </tr>
           </thead>
           <tbody>
-            {#each rows as row (row.student.id)}
+            {#each visibleRows as row (row.student.id)}
               <tr>
                 <td>
                   <strong>{row.name}</strong>
                   {#if row.student.alwaysGo}<span class="badge">Can always go</span>{:else if row.student.exempt}<span class="badge">Exempt</span>{/if}
+                </td>
+                <td>
+                  {#if row.category}
+                    <span class="category-badge" style:background={destinationColors[row.category.color].soft} style:color={destinationColors[row.category.color].strong}>{row.category.name}</span>
+                  {:else}–{/if}
                 </td>
                 <td>{row.classes.join(', ') || '–'}</td>
                 {#if account.studentPins}
@@ -202,7 +338,7 @@
           </tbody>
           <tfoot>
             <tr>
-              <td colspan={account.studentPins ? 3 : 2}><strong>All students</strong></td>
+              <td colspan={account.studentPins ? 4 : 3}><strong>{visibleRows.length === rows.length ? 'All students' : `${visibleRows.length} shown`}</strong></td>
               <td class="num"><strong>{totals.week}</strong></td>
               <td class="num"><strong>{totals.minutesWeek}</strong></td>
               <td></td>
@@ -213,6 +349,7 @@
     {:else}
       <p class="muted">No students yet. Add them to a class, and they appear here.</p>
     {/if}
+    {#if rows.length > 0 && visibleRows.length === 0}<p class="muted">No students match these filters.</p>{/if}
   </section>
 </div>
 
@@ -283,6 +420,43 @@
     letter-spacing: 0.1em;
   }
 
+  .category-manager, .category-list, .roster-filters, .category-add {
+    display: grid;
+    gap: 12px;
+  }
+
+  .category-add, .roster-filters {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    align-items: end;
+  }
+
+  .category-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .category-list li {
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(120px, 180px) auto auto;
+    align-items: end;
+    gap: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .category-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .roster-filters {
+    padding: 14px;
+  }
+
   .merges {
     display: grid;
     gap: 10px;
@@ -325,5 +499,11 @@
     margin-bottom: 6px;
     font-size: 14px;
     font-weight: 700;
+  }
+
+  @media (max-width: 650px) {
+    .category-list li {
+      grid-template-columns: 1fr 1fr;
+    }
   }
 </style>

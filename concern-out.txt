@@ -1,0 +1,11 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... ing]::UTF8; bun test hub-host/server.test.ts -t "creates a hub visit  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+hub-host\server.test.ts:
+
+error: regex "creates a hub visit concern" matched 0 tests. Searched 1 file (skipping 29 tests) [113.00ms]

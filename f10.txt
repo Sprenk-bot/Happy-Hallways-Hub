@@ -1,0 +1,71 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... m.Text.Encoding]::UTF8; bun test hub-host/server.test.ts 2>&1 | Out-F ...
++                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+hub-host\server.test.ts:
+(pass) local Hub Host staff fallback and state service > serves the static app and routes safely from the Hub Host 
+origin [174.67ms]
+(pass) local Hub Host staff fallback and state service > requires a staff session and lets an enrolled TIC save 
+versioned state [154.87ms]
+(pass) local Hub Host staff fallback and state service > keeps named-profile sign-in disabled unless Host 
+configuration enables it [57.09ms]
+(pass) local Hub Host staff fallback and state service > allows one of two concurrent writes based on the same 
+revision [165.33ms]
+(pass) local Hub Host staff fallback and state service > merges stale writes to separate records and audits the source 
+revision [185.52ms]
+(pass) local Hub Host staff fallback and state service > rejects overlapping stale edits without changing the 
+acknowledged record [167.56ms]
+(pass) local Hub Host staff fallback and state service > limits EA account access to operational records and withholds 
+PIN and pairing secrets [217.68ms]
+(pass) local Hub Host staff fallback and state service > enrols an EA with a single-use invitation and lets TIC revoke 
+the device session [110.04ms]
+(pass) local Hub Host staff fallback and state service > runs the Hub kiosk through a one-use activation without 
+exposing staff access [316.50ms]
+(pass) local Hub Host staff fallback and state service > keeps an activated kiosk session across a Host restart 
+[237.01ms]
+(pass) local Hub Host staff fallback and state service > keeps favourites personal to each staff profile across Host 
+restarts [251.66ms]
+(pass) local Hub Host staff fallback and state service > routes concern notes to selected staff, preserves inbox 
+messages, and withholds notes from others [282.46ms]
+(pass) local Hub Host staff fallback and state service > links an Entra identity to an email-invited staff profile 
+[227.42ms]
+(pass) local Hub Host staff fallback and state service > keeps the snapshot and enrolled session after a host restart 
+[256.68ms]
+(pass) local Hub Host staff fallback and state service > creates an email-bound Entra invitation for the first TIC 
+[35.27ms]
+(pass) local Hub Host staff fallback and state service > refuses a second bootstrap invitation after an active 
+invitation or profile exists [25.43ms]
+(pass) local Hub Host staff fallback and state service > reports healthy SQLite, refuses LAN binding, and checks Host 
+and Origin [110.57ms]
+(pass) local Hub Host staff fallback and state service > requires ICT MFA, HTTPS LAN, and an encrypted-backup key 
+before Entra sign-in [1.22ms]
+(pass) local Hub Host staff fallback and state service > creates verified local snapshots, copies them off-host, and 
+exposes accurate limits [247.14ms]
+(pass) local Hub Host staff fallback and state service > reports off-host backups as unconfigured when no approved 
+path is supplied [114.05ms]
+(pass) local Hub Host staff fallback and state service > does not call the local snapshot folder an off-host backup 
+[117.31ms]
+(pass) local Hub Host staff fallback and state service > uses a configured fallback copy when the preferred 
+destination fails [208.50ms]
+(pass) local Hub Host staff fallback and state service > keeps each acknowledged revision and restores one between 
+local snapshots [360.27ms]
+(pass) local Hub Host staff fallback and state service > stages and promotes a TIC restore while preserving a 
+pre-restore point and audit [257.89ms]
+(pass) local Hub Host staff fallback and state service > refuses promotion when the live revision changes after 
+restore staging [205.07ms]
+(pass) local Hub Host staff fallback and state service > migrates a version-three database to revision history without 
+losing attribution [56.41ms]
+(pass) local Hub Host staff fallback and state service > adds staff and revision history tables to an existing 
+version-one database without changing its state [148.39ms]
+(pass) local Hub Host staff fallback and state service > detects damaged compressed revision history and disables that 
+restore point [216.46ms]
+(pass) local Hub Host staff fallback and state service > does not overwrite a damaged snapshot [177.77ms]
+
+ 29 pass
+ 0 fail
+ 332 expect() calls
+Ran 29 tests across 1 file. [5.20s]

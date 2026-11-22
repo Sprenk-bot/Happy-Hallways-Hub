@@ -1,0 +1,222 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... m.Text.Encoding]::UTF8; bun test hub-host/server.test.ts 2>&1 | Out-F ...
++                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+hub-host\server.test.ts:
+(pass) local Hub Host staff fallback and state service > serves the static app and routes safely from the Hub Host 
+origin [189.89ms]
+213 |       method: "PUT",
+214 |       headers: { Cookie: cookie, "Content-Type": "application/json" },
+215 |       body: JSON.stringify({ expectedRevision: 0, snapshot: { version: 2 } }),
+216 |     });
+217 |     expect(stale.status).toBe(409);
+218 |     expect(await stale.json()).toMatchObject({
+                                     ^
+error: expect(received).toMatchObject(expected)
+
+  {
+-   "currentRevision": 1,
+-   "error": "revision_conflict",
++   "error": "hub_prompt_configuration_changed",
+  }
+
+- Expected  - 2
++ Received  + 1
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:218:32)
+(fail) local Hub Host staff fallback and state service > requires a staff session and lets an enrolled TIC save 
+versioned state [119.84ms]
+(pass) local Hub Host staff fallback and state service > keeps named-profile sign-in disabled unless Host 
+configuration enables it [78.93ms]
+(pass) local Hub Host staff fallback and state service > allows one of two concurrent writes based on the same 
+revision [99.38ms]
+(fail) local Hub Host staff fallback and state service > merges stale writes to separate records and audits the source 
+revision [10001.56ms]
+  ^ a beforeEach/afterEach hook timed out for this test.
+381 |         }),
+382 |       });
+383 |     expect((await savePass("2026-11-12T01:10:00.000Z")).status).toBe(200);
+384 |     const conflict = await savePass("2026-11-12T01:11:00.000Z");
+385 |     expect(conflict.status).toBe(409);
+386 |     expect(await conflict.json()).toMatchObject({
+                                        ^
+error: expect(received).toMatchObject(expected)
+
+  {
+-   "conflictingPaths": [
+-     "$.passes[id=fictional-pass-1].outAt",
+-   ],
+-   "currentRevision": 2,
+-   "error": "revision_conflict",
++   "error": "hub_prompt_configuration_changed",
+  }
+
+- Expected  - 5
++ Received  + 1
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:386:35)
+20 | const runningHosts: RunningHubHost[] = [];
+21 | 
+22 | afterEach(async () => {
+23 |   for (const host of runningHosts.splice(0)) await host.close();
+24 |   for (const directory of temporaryDirectories.splice(0))
+25 |     rmSync(directory, { recursive: true, force: true });
+         ^
+EBUSY: resource busy or locked, rm 'C:\Users\kcspr\AppData\Local\Temp\happy-hallways-hub-host-PA6lcU'
+    path: "C:\\Users\\kcspr\\AppData\\Local\\Temp\\happy-hallways-hub-host-PA6lcU",
+ syscall: "rm",
+   errno: -4082,
+    code: "EBUSY"
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:25:5)
+(fail) local Hub Host staff fallback and state service > rejects overlapping stale edits without changing the 
+acknowledged record [219.07ms]
+(fail) local Hub Host staff fallback and state service > limits EA account access to operational records and withholds 
+PIN and pairing secrets [10002.91ms]
+  ^ a beforeEach/afterEach hook timed out for this test.
+20 | const runningHosts: RunningHubHost[] = [];
+21 | 
+22 | afterEach(async () => {
+23 |   for (const host of runningHosts.splice(0)) await host.close();
+24 |   for (const directory of temporaryDirectories.splice(0))
+25 |     rmSync(directory, { recursive: true, force: true });
+         ^
+EBUSY: resource busy or locked, rm 'C:\Users\kcspr\AppData\Local\Temp\happy-hallways-hub-host-Vrqnu9'
+    path: "C:\\Users\\kcspr\\AppData\\Local\\Temp\\happy-hallways-hub-host-Vrqnu9",
+ syscall: "rm",
+   errno: -4082,
+    code: "EBUSY"
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:25:5)
+(fail) local Hub Host staff fallback and state service > enrols an EA with a single-use invitation and lets TIC revoke 
+the device session [201.64ms]
+1132 | 
+1133 |     expect(
+1134 |       (
+1135 |         await fetch(`${host.url}/api/v1/kiosk/start`, { method: "POST" })
+1136 |       ).status,
+1137 |     ).toBe(401);
+             ^
+error: expect(received).toBe(expected)
+
+Expected: 401
+Received: 404
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:1137:7)
+(fail) local Hub Host staff fallback and state service > runs the Hub kiosk through a one-use activation without 
+exposing staff access [112.11ms]
+2019 |     const activated = await fetch(`${host.url}/api/v1/kiosk/activate`, {
+2020 |       method: "POST",
+2021 |       headers: { "Content-Type": "application/json" },
+2022 |       body: JSON.stringify({ token: activation.token }),
+2023 |     });
+2024 |     expect(activated.status).toBe(201);
+                                    ^
+error: expect(received).toBe(expected)
+
+Expected: 201
+Received: 404
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:2024:30)
+(fail) local Hub Host staff fallback and state service > keeps an activated kiosk session across a Host restart 
+[103.31ms]
+(pass) local Hub Host staff fallback and state service > keeps favourites personal to each staff profile across Host 
+restarts [228.93ms]
+(fail) local Hub Host staff fallback and state service > routes concern notes to selected staff, preserves inbox 
+messages, and withholds notes from others [10000.43ms]
+  ^ a beforeEach/afterEach hook timed out for this test.
+20 | const runningHosts: RunningHubHost[] = [];
+21 | 
+22 | afterEach(async () => {
+23 |   for (const host of runningHosts.splice(0)) await host.close();
+24 |   for (const directory of temporaryDirectories.splice(0))
+25 |     rmSync(directory, { recursive: true, force: true });
+         ^
+EBUSY: resource busy or locked, rm 'C:\Users\kcspr\AppData\Local\Temp\happy-hallways-hub-host-ln5Don'
+    path: "C:\\Users\\kcspr\\AppData\\Local\\Temp\\happy-hallways-hub-host-ln5Don",
+ syscall: "rm",
+   errno: -4082,
+    code: "EBUSY"
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:25:5)
+(fail) local Hub Host staff fallback and state service > links an Entra identity to an email-invited staff profile 
+[202.93ms]
+(pass) local Hub Host staff fallback and state service > keeps the snapshot and enrolled session after a host restart 
+[235.38ms]
+(pass) local Hub Host staff fallback and state service > creates an email-bound Entra invitation for the first TIC 
+[29.20ms]
+(pass) local Hub Host staff fallback and state service > refuses a second bootstrap invitation after an active 
+invitation or profile exists [24.50ms]
+(pass) local Hub Host staff fallback and state service > reports healthy SQLite, refuses LAN binding, and checks Host 
+and Origin [81.08ms]
+(pass) local Hub Host staff fallback and state service > requires ICT MFA, HTTPS LAN, and an encrypted-backup key 
+before Entra sign-in [1.97ms]
+(fail) local Hub Host staff fallback and state service > creates verified local snapshots, copies them off-host, and 
+exposes accurate limits [10002.34ms]
+  ^ a beforeEach/afterEach hook timed out for this test.
+20 | const runningHosts: RunningHubHost[] = [];
+21 | 
+22 | afterEach(async () => {
+23 |   for (const host of runningHosts.splice(0)) await host.close();
+24 |   for (const directory of temporaryDirectories.splice(0))
+25 |     rmSync(directory, { recursive: true, force: true });
+         ^
+EBUSY: resource busy or locked, rm 'C:\Users\kcspr\AppData\Local\Temp\happy-hallways-hub-host-QT38vs'
+    path: "C:\\Users\\kcspr\\AppData\\Local\\Temp\\happy-hallways-hub-host-QT38vs",
+ syscall: "rm",
+   errno: -4082,
+    code: "EBUSY"
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:25:5)
+(fail) local Hub Host staff fallback and state service > reports off-host backups as unconfigured when no approved 
+path is supplied [158.02ms]
+(pass) local Hub Host staff fallback and state service > does not call the local snapshot folder an off-host backup 
+[151.25ms]
+(pass) local Hub Host staff fallback and state service > uses a configured fallback copy when the preferred 
+destination fails [180.05ms]
+(pass) local Hub Host staff fallback and state service > keeps each acknowledged revision and restores one between 
+local snapshots [381.61ms]
+(fail) local Hub Host staff fallback and state service > stages and promotes a TIC restore while preserving a 
+pre-restore point and audit [10003.03ms]
+  ^ a beforeEach/afterEach hook timed out for this test.
+20 | const runningHosts: RunningHubHost[] = [];
+21 | 
+22 | afterEach(async () => {
+23 |   for (const host of runningHosts.splice(0)) await host.close();
+24 |   for (const directory of temporaryDirectories.splice(0))
+25 |     rmSync(directory, { recursive: true, force: true });
+         ^
+EBUSY: resource busy or locked, rm 'C:\Users\kcspr\AppData\Local\Temp\happy-hallways-hub-host-zrctx7'
+    path: "C:\\Users\\kcspr\\AppData\\Local\\Temp\\happy-hallways-hub-host-zrctx7",
+ syscall: "rm",
+   errno: -4082,
+    code: "EBUSY"
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:25:5)
+(fail) local Hub Host staff fallback and state service > refuses promotion when the live revision changes after 
+restore staging [265.10ms]
+(pass) local Hub Host staff fallback and state service > migrates a version-three database to revision history without 
+losing attribution [67.12ms]
+(pass) local Hub Host staff fallback and state service > adds staff and revision history tables to an existing 
+version-one database without changing its state [151.38ms]
+(pass) local Hub Host staff fallback and state service > detects damaged compressed revision history and disables that 
+restore point [352.91ms]
+(pass) local Hub Host staff fallback and state service > does not overwrite a damaged snapshot [115.46ms]
+
+ 16 pass
+ 13 fail
+ 185 expect() calls
+Ran 29 tests across 1 file. [53.89s]

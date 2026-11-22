@@ -7,6 +7,7 @@
   import Icon from '#lib/Icon.svelte';
   import { leaveTo } from '#lib/leaving.ts';
   import { onboarding, updateOnboarding } from '#lib/onboarding.svelte.ts';
+  import { hubRuntime } from '#lib/hub-runtime.svelte.ts';
 
   let pending = $state('');
   let error = $state('');
@@ -52,8 +53,11 @@
       <p class="eyebrow">Settings</p>
       <h1>Your data</h1>
       <p class="muted">
-        Happy Hallways has no sign-in. Everything it knows lives in this browser on this computer, and if the browser's data
-        is cleared, it's gone. Download a backup now and then.
+        {#if hubRuntime.hosted}
+          The Hub Host stores the shared account and its local recovery copies. You can also download a separate account backup here.
+        {:else}
+          This classroom account lives in this browser on this computer. If browser data is cleared, this copy is lost. Download a backup now and then.
+        {/if}
       </p>
     </div>
   </header>
@@ -78,6 +82,20 @@
     {#if daysSinceExport === null || daysSinceExport > 7}
       <div class="notice-bar"><Icon name="alert-triangle" />It's been a while. A backup is the only copy outside this browser.</div>
     {/if}
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Hub Host</p>
+        <h2>Staff access and recovery</h2>
+        <p class="muted small">
+          Check the local Host, use the configured staff sign-in, and review TIC backup and restore controls. School network
+          access and the Entra connection still require ICT setup and testing.
+        </p>
+      </div>
+      <a class="btn" href="/hub-admin"><Icon name="shield-check" size={16} />Open Hub Host</a>
+    </div>
   </section>
 
   <section class="card">

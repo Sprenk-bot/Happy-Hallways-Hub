@@ -1,0 +1,107 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... m.Text.Encoding]::UTF8; bun test hub-host/server.test.ts 2>&1 | Out-F ...
++                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+hub-host\server.test.ts:
+(pass) local Hub Host staff fallback and state service > serves the static app and routes safely from the Hub Host 
+origin [182.39ms]
+(pass) local Hub Host staff fallback and state service > requires a staff session and lets an enrolled TIC save 
+versioned state [206.85ms]
+(pass) local Hub Host staff fallback and state service > keeps named-profile sign-in disabled unless Host 
+configuration enables it [72.53ms]
+(pass) local Hub Host staff fallback and state service > allows one of two concurrent writes based on the same 
+revision [218.73ms]
+(pass) local Hub Host staff fallback and state service > merges stale writes to separate records and audits the source 
+revision [130.47ms]
+(pass) local Hub Host staff fallback and state service > rejects overlapping stale edits without changing the 
+acknowledged record [188.22ms]
+(pass) local Hub Host staff fallback and state service > limits EA account access to operational records and withholds 
+PIN and pairing secrets [189.97ms]
+(pass) local Hub Host staff fallback and state service > enrols an EA with a single-use invitation and lets TIC revoke 
+the device session [265.74ms]
+967 |             student,
+968 |             typeof visit.classId === "string" ? visit.classId : undefined,
+969 |           ) &&
+970 |           request.pin !== student.pin
+971 |         ) {
+972 |           throw new HubKioskPinError();
+                      ^
+HubKioskPinError: The student PIN did not match.
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\store.ts:972:17)
+      at transaction (bun:sqlite:447:27)
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\routes.ts:726:29)
+(fail) local Hub Host staff fallback and state service > runs the Hub kiosk through a one-use activation without 
+exposing staff access [5157.17ms]
+  ^ a beforeEach/afterEach hook timed out for this test.
+20 | const runningHosts: RunningHubHost[] = [];
+21 | 
+22 | afterEach(async () => {
+23 |   for (const host of runningHosts.splice(0)) await host.close();
+24 |   for (const directory of temporaryDirectories.splice(0))
+25 |     rmSync(directory, { recursive: true, force: true });
+         ^
+EBUSY: resource busy or locked, rm 'C:\Users\kcspr\AppData\Local\Temp\happy-hallways-hub-host-gFdASi'
+    path: "C:\\Users\\kcspr\\AppData\\Local\\Temp\\happy-hallways-hub-host-gFdASi",
+ syscall: "rm",
+   errno: -4082,
+    code: "EBUSY"
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:25:5)
+(fail) local Hub Host staff fallback and state service > keeps an activated kiosk session across a Host restart 
+[258.98ms]
+(pass) local Hub Host staff fallback and state service > keeps favourites personal to each staff profile across Host 
+restarts [262.12ms]
+(pass) local Hub Host staff fallback and state service > routes concern notes to selected staff, preserves inbox 
+messages, and withholds notes from others [333.04ms]
+(pass) local Hub Host staff fallback and state service > links an Entra identity to an email-invited staff profile 
+[190.23ms]
+(pass) local Hub Host staff fallback and state service > keeps the snapshot and enrolled session after a host restart 
+[251.30ms]
+(pass) local Hub Host staff fallback and state service > creates an email-bound Entra invitation for the first TIC 
+[28.30ms]
+(pass) local Hub Host staff fallback and state service > refuses a second bootstrap invitation after an active 
+invitation or profile exists [27.37ms]
+(pass) local Hub Host staff fallback and state service > reports healthy SQLite, refuses LAN binding, and checks Host 
+and Origin [111.82ms]
+(pass) local Hub Host staff fallback and state service > requires ICT MFA, HTTPS LAN, and an encrypted-backup key 
+before Entra sign-in [1.31ms]
+(pass) local Hub Host staff fallback and state service > creates verified local snapshots, copies them off-host, and 
+exposes accurate limits [297.37ms]
+(pass) local Hub Host staff fallback and state service > reports off-host backups as unconfigured when no approved 
+path is supplied [129.58ms]
+(pass) local Hub Host staff fallback and state service > does not call the local snapshot folder an off-host backup 
+[140.81ms]
+(pass) local Hub Host staff fallback and state service > uses a configured fallback copy when the preferred 
+destination fails [131.26ms]
+(pass) local Hub Host staff fallback and state service > keeps each acknowledged revision and restores one between 
+local snapshots [340.73ms]
+(pass) local Hub Host staff fallback and state service > stages and promotes a TIC restore while preserving a 
+pre-restore point and audit [242.75ms]
+(pass) local Hub Host staff fallback and state service > refuses promotion when the live revision changes after 
+restore staging [239.86ms]
+(pass) local Hub Host staff fallback and state service > migrates a version-three database to revision history without 
+losing attribution [70.36ms]
+(pass) local Hub Host staff fallback and state service > adds staff and revision history tables to an existing 
+version-one database without changing its state [160.88ms]
+(pass) local Hub Host staff fallback and state service > detects damaged compressed revision history and disables that 
+restore point [254.03ms]
+(pass) local Hub Host staff fallback and state service > does not overwrite a damaged snapshot [135.09ms]
+
+2 tests failed:
+(fail) local Hub Host staff fallback and state service > runs the Hub kiosk through a one-use activation without 
+exposing staff access [5157.17ms]
+  ^ a beforeEach/afterEach hook timed out for this test.
+(fail) local Hub Host staff fallback and state service > keeps an activated kiosk session across a Host restart 
+[258.98ms]
+
+ 27 pass
+ 2 fail
+ 266 expect() calls
+Ran 29 tests across 1 file. [10.34s]

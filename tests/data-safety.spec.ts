@@ -107,7 +107,12 @@ test('2. this version saves under its own key and leaves the older one as it was
   const storage = await page.evaluate(() => ({ ...localStorage }));
   expect(storage['hallway.account']).toBe(original);
   const v2 = JSON.parse(storage['hallway.account.v2']);
-  expect(v2.version).toBe(2);
+  expect(v2.version).toBe(4);
+  expect(v2.hubVisits).toEqual([]);
+  expect(v2.studentCategories.map((category: { name: string }) => category.name)).toEqual([
+    'Year 7', 'Year 8', 'Year 9', 'Year 10', 'Year 11', 'Year 12',
+  ]);
+  expect(v2.roster.every((student: { categoryId?: string }) => !student.categoryId)).toBe(true);
   expect(v2.pin).toBe('9753');
   expect(v2.roster).toHaveLength(2);
 });
@@ -403,7 +408,7 @@ test('13. a backup says which version made it, and one from a newer version is r
     }
     return { version: exported.version, refused };
   });
-  expect(result.version).toBe(2);
+  expect(result.version).toBe(4);
   expect(result.refused).toContain('newer version');
 });
 

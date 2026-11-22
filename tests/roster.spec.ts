@@ -42,6 +42,89 @@ test("a student the teacher says isn't the same joins as a new student", async (
   await expect(page.getByRole('row', { name: /Maya Chen/ })).toHaveCount(2);
 });
 
+test('year groups can be managed, assigned, searched and filtered without changing pass data', async ({ page }) => {
+  await newClass(page, 'Period 1', 'Maya Chen\nJordan Ellis');
+  await page.getByRole('link', { name: 'Roster', exact: true }).click();
+
+  await page.getByRole('button', { name: 'Manage year groups' }).click();
+  await page.getByRole('textbox', { name: 'New year group' }).fill('Learning Support');
+  await page.getByRole('button', { name: 'Add year group' }).click();
+  const newCategoryRow = page.locator('.category-list li').last();
+  const newCategoryName = newCategoryRow.locator('input').first();
+  await newCategoryName.fill('Year 7 Support');
+  await newCategoryName.press('Tab');
+  await newCategoryRow.locator('select').selectOption('orange');
+  await expect(newCategoryName).toHaveValue('Year 7 Support');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  const needsYou = page.getByRole('button', { name: /Needs you/ });
+  if ((await needsYou.getAttribute('aria-expanded')) === 'true') await needsYou.click();
+  await page.getByRole('button', { name: 'Edit Maya Chen' }).click();
+  await page.getByLabel('Student year group').selectOption({ label: 'Year 7 Support' });
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByRole('row', { name: /Maya Chen/ })).toContainText('Year 7 Support');
+  await expect(page.getByRole('button', { name: 'Remove Year 7 Support' })).toBeDisabled();
+
+  await page.getByLabel('Filter by year group').selectOption({ label: 'Year 7 Support' });
+  await expect(page.getByRole('row', { name: /Maya Chen/ })).toBeVisible();
+  await expect(page.getByRole('row', { name: /Jordan Ellis/ })).toHaveCount(0);
+  await expect(page.getByText('1 shown')).toBeVisible();
+
+  await page.getByLabel('Filter by year group').selectOption('');
+  await page.getByLabel('Search students').fill('Year 7 Support');
+  await expect(page.getByRole('row', { name: /Maya Chen/ })).toBeVisible();
+  await expect(page.getByRole('row', { name: /Jordan Ellis/ })).toHaveCount(0);
+
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('hallway.account.v2')!));
+  expect(saved.version).toBe(4);
+  expect(saved.roster.find((student: { firstName: string }) => student.firstName === 'Maya').categoryId).toBeTruthy();
+  expect(saved.passes).toEqual([]);
+});
+
+test('merging students preserves Hub visits and categories, and undo restores ownership', async ({ page }) => {
+  await page.goto('/privacy');
+  await page.evaluate((at) => {
+    localStorage.setItem('hallway.account.v2', JSON.stringify({
+      version: 2,
+      laptopPeerId: 'hallway-fictional',
+      roster: [
+        { id: 'maya', firstName: 'Maya', categoryId: 'year-7' },
+        { id: 'sam', firstName: 'Sam', categoryId: 'year-9' },
+      ],
+      classes: [
+        { id: 'p1', name: 'Period 1', createdAt: at, members: [{ studentId: 'maya', lastPrefix: 'C', status: 'current' }] },
+        { id: 'p2', name: 'Period 2', createdAt: at, members: [{ studentId: 'sam', lastPrefix: 'S', status: 'current' }] },
+      ],
+      passes: [],
+    }));
+  }, new Date().toISOString());
+  await page.goto('/settings');
+  const result = await page.evaluate(async () => {
+    const m = await import('/src/lib/account.svelte.ts');
+    const visitId = m.startHubVisit({ studentId: 'sam', destinationId: m.account.destinations[0].id }, '2026-11-12T01:00:00.000Z');
+    m.mergeStudents('maya', 'sam');
+    const merged = m.account.roster.find((student) => student.id === 'maya')?.categoryId;
+    const mergedVisit = m.account.hubVisits.find((visit) => visit.id === visitId);
+    const mergedVisitSnapshot = mergedVisit && { studentId: mergedVisit.studentId, studentName: mergedVisit.studentName };
+    const mergeId = m.account.merges?.at(-1)?.id;
+    if (!mergeId) throw new Error('Merge record was not created.');
+    m.undoMerge(mergeId);
+    return {
+      merged,
+      mergedVisit: mergedVisitSnapshot,
+      restoredVisit: m.account.hubVisits.find((visit) => visit.id === visitId)?.studentId,
+      restored: m.account.roster.map((student) => ({ id: student.id, categoryId: student.categoryId })),
+    };
+  });
+  expect(result.merged).toBe('year-7');
+  expect(result.mergedVisit).toEqual({ studentId: 'maya', studentName: 'Sam' });
+  expect(result.restoredVisit).toBe('sam');
+  expect(result.restored).toEqual([
+    { id: 'maya', categoryId: 'year-7' },
+    { id: 'sam', categoryId: 'year-9' },
+  ]);
+});
+
 test('an account from before the Roster keeps every student, and the teacher merges the same child once', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(() => {

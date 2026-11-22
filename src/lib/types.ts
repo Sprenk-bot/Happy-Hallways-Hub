@@ -7,6 +7,7 @@ import type { DestinationColor, DestinationIcon } from './destinations';
 export type Student = {
   id: string;
   firstName: string;
+  categoryId?: string;
   /**
    * The full last name, kept only on the teacher's computer (docs/adr/0017). The kiosk and the
    * Student link only ever get the Display Name. Missing for students imported before full names were kept.
@@ -24,6 +25,81 @@ export type Student = {
    * name, when their class asks for one. Never a real school ID. See docs/adr/0013.
    */
   pin?: string;
+};
+
+export type StudentCategory = {
+  id: string;
+  name: string;
+  color: DestinationColor;
+};
+
+export const hubKioskChimeValues = ['soft', 'warm', 'bright', 'none'] as const;
+export type HubKioskChime = (typeof hubKioskChimeValues)[number];
+
+export function isHubKioskChime(value: unknown): value is HubKioskChime {
+  return hubKioskChimeValues.some((chime) => chime === value);
+}
+
+export type HubKioskSoundSettings = {
+  muted: boolean;
+  volume: number;
+  commonChime: HubKioskChime;
+};
+
+export type HubPromptStage = 'arrival' | 'departure';
+export type HubPromptResponseType = 'written' | 'rating';
+export type HubPromptRatingStyle = 'numbers' | 'stars';
+
+export type HubVisitPrompt = {
+  id: string;
+  question: string;
+  guidance?: string;
+  responseType: HubPromptResponseType;
+  required: boolean;
+  scaleMax?: 5 | 10;
+  ratingStyle?: HubPromptRatingStyle;
+  minLabel?: string;
+  maxLabel?: string;
+};
+
+export type HubPromptResponseSnapshot = {
+  promptId: string;
+  promptVersion: number;
+  destinationId: string;
+  stage: HubPromptStage;
+  question: string;
+  guidance?: string;
+  responseType: HubPromptResponseType;
+  required: boolean;
+  scaleMax?: 5 | 10;
+  ratingStyle?: HubPromptRatingStyle;
+  minLabel?: string;
+  maxLabel?: string;
+  answer: string | number;
+  answeredAt: string;
+};
+
+export type HubPromptOverride = {
+  id: string;
+  studentId: string;
+  destinationId: string;
+  stage: HubPromptStage;
+  reason: string;
+  requestedAt: string;
+  expiresAt: string;
+  requestedBy: StaffAttribution;
+};
+
+export type HubPromptOverrideSnapshot = {
+  overrideId: string;
+  destinationId: string;
+  stage: HubPromptStage;
+  promptVersion: number;
+  reason: string;
+  requestedAt: string;
+  appliedAt: string;
+  usedToSkip: boolean;
+  requestedBy: StaffAttribution;
 };
 
 /** A Student's place in one Class. */
@@ -58,6 +134,22 @@ export type Destination = {
   limit: number | null;
   /** Whether a trip here takes one of the Class Limit's spots. Missing means it does. Only used with a Class Limit. */
   countsTowardClassLimit?: boolean;
+  /** Whether students may choose this destination on the Hub kiosk. Missing means available. */
+  kioskAvailable?: boolean;
+  /** Whether this destination may be selected for a Temporary Trip. */
+  temporaryTripAvailable?: boolean;
+  /** Chime played on the Hub kiosk after the Host accepts arrival at this destination. */
+  hubArrivalChime?: HubKioskChime;
+  /** Shared version for this destination's arrival and departure prompt configuration. */
+  hubPromptVersion?: number;
+  hubArrivalPrompts?: HubVisitPrompt[];
+  hubDeparturePrompts?: HubVisitPrompt[];
+  /** Safe display label for a private destination on student-facing Hub screens. */
+  kioskLabel?: string;
+  /** Optional student-facing confirmation shown after the Hub Host saves an arrival. */
+  kioskConfirmation?: string;
+  /** TIC opt-in for this destination to appear in classroom Inform the Hub. */
+  informHubAvailable?: boolean;
   /**
    * A Private destination, like the Nurse or the Counselor: wherever students can
    * see, a trip here shows only as "Out", never where. It never has a Pass Limit
@@ -257,6 +349,61 @@ export type Pass = {
   updatedAt: string;
 };
 
+export type TemporaryTrip = {
+  id: string;
+  destinationId?: string;
+  destinationLabel: string;
+  startedAt: string;
+  startedBy?: HubVisitAttribution;
+  returnedAt?: string;
+  returnedBy?: HubVisitAttribution;
+};
+
+export type StaffAttribution = {
+  staffId: string;
+  displayName: string;
+  role: 'ea' | 'tic';
+};
+
+export type HubVisitAttribution =
+  | StaffAttribution
+  | { type: 'student-kiosk' };
+
+export type HubVisitCancellationReason = 'withdrawn' | 'did-not-arrive';
+
+/** A Hub movement record, kept separate from ordinary classroom Pass records. */
+export type HubVisit = {
+  id: string;
+  studentId: string;
+  /** Frozen when the movement starts, even if the Roster is later edited. */
+  studentName: string;
+  studentCategory?: StudentCategory;
+  destinationId?: string;
+  destinationLabel: string;
+  classId?: string;
+  className?: string;
+  periodName?: string;
+  source: "classroom-notification" | "direct-kiosk-arrival";
+  notifiedBy?: StaffAttribution;
+  arrivedBy?: HubVisitAttribution;
+  returnedBy?: StaffAttribution;
+  /** Missing for a direct kiosk arrival; never inferred from another event. */
+  leftClassAt?: string;
+  /** Shared operational indicator only; concern text is stored in the Host inbox. */
+  hasConcern?: boolean;
+  arrivedAtHubAt?: string;
+  leftBy?: HubVisitAttribution;
+  leftHubAt?: string;
+  arrivedBackAtClassAt?: string;
+  cancelledAt?: string;
+  cancellationReason?: HubVisitCancellationReason;
+  cancelledBy?: StaffAttribution;
+  temporaryTrips: TemporaryTrip[];
+  /** Individual answers are immutable snapshots of the prompt configuration used. */
+  promptResponses?: HubPromptResponseSnapshot[];
+  promptOverrides?: HubPromptOverrideSnapshot[];
+};
+
 /**
  * One student waiting in a Line at the kiosk, and where they want to go. Each
  * destination's line is the spots that name it; under a Class Limit, every
@@ -283,12 +430,14 @@ export type Kiosk =
 
 /** Everything the teacher's laptop holds. A Backup is exactly this, written to a file. */
 export type Account = {
-  /** 1 before the Account moved to its own key; 2 since. A later version may raise it. */
+  /** 1 before the Account moved to its own key; later versions add recoverable fields. */
   version: number;
   /** The fixed address a paired kiosk uses to find this laptop again. */
   laptopPeerId: string;
   /** Every student the teacher teaches, each once. See docs/adr/0015. */
   roster: Student[];
+  /** TIC-managed year groups or other student categories. */
+  studentCategories: StudentCategory[];
   /**
    * Whether students type their PIN after tapping their name at the kiosk, in every class, and
    * whether they can set up their own device on the Student link. Off unless the teacher turns it on.
@@ -299,6 +448,10 @@ export type Account = {
   classes: Class[];
   destinations: Destination[];
   passes: Pass[];
+  /** Main Hub Visits and their Temporary Trips; never folded into classroom passes. */
+  hubVisits: HubVisit[];
+  /** Short-lived, staff-authorised exceptions for required Hub prompts. */
+  hubPromptOverrides?: HubPromptOverride[];
   /** Whether students may join a Line once its Pass Limit is reached. */
   lineEnabled: boolean;
   /** Every Line. The teacher's computer is in charge of them. */
@@ -335,6 +488,8 @@ export type Account = {
   claims: Claim[];
   /** A chime on the teacher's computer when a pass becomes Overdue. Off unless the teacher turns it on. */
   overdueChime?: boolean;
+  /** Sound controls for the separate Hub kiosk, not the classroom-pass kiosk. */
+  hubKioskSoundSettings?: HubKioskSoundSettings;
   /** Every Attendance mark, for classes that take Attendance. See docs/adr/0020. */
   attendance: AttendanceMark[];
   /** Attendance for every class, while the teacher has it on (one setting for now). See docs/adr/0020. */
@@ -378,6 +533,8 @@ export type MergeRecord = {
   passIds: string[];
   requestIds: string[];
   deniedIds: string[];
+  /** Hub visits moved from the merged-away student, so undo can restore ownership. */
+  hubVisitIds?: string[];
   attendanceIds: string[];
   /** Marks of the merged-away student dropped because the kept one had a mark that day. */
   removedMarks: AttendanceMark[];

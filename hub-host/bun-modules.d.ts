@@ -1,6 +1,7 @@
 declare module "bun:sqlite" {
   interface Statement {
     get<T = Record<string, unknown>>(...parameters: unknown[]): T | undefined;
+    all<T = Record<string, unknown>>(...parameters: unknown[]): T[];
     run(...parameters: unknown[]): unknown;
   }
 

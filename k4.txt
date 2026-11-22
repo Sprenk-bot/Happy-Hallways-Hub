@@ -1,0 +1,31 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... ing]::UTF8; bun test hub-host/server.test.ts -t "runs the Hub kiosk"  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+hub-host\server.test.ts:
+967 |             student,
+968 |             typeof visit.classId === "string" ? visit.classId : undefined,
+969 |           ) &&
+970 |           request.pin !== student.pin
+971 |         ) {
+972 |           throw new HubKioskPinError();
+                      ^
+HubKioskPinError: The student PIN did not match.
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\store.ts:972:17)
+      at transaction (bun:sqlite:447:27)
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\routes.ts:726:29)
+(fail) local Hub Host staff fallback and state service > runs the Hub kiosk through a one-use activation without 
+exposing staff access [5258.62ms]
+  ^ a beforeEach/afterEach hook timed out for this test.
+
+ 0 pass
+ 28 filtered out
+ 1 fail
+ 29 expect() calls
+Ran 1 test across 1 file. [5.38s]

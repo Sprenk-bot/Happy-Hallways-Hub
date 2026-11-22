@@ -40,14 +40,40 @@ const iceTransportPolicy: RTCIceTransportPolicy = env.VITE_FORCE_TURN === 'true'
 let relay: { servers: RTCIceServer[]; fetchedAt: number } | null = null;
 let relayProblem = '';
 
+/** Checks that /api/turn really handed back an array of ICE servers. */
+function isTurnCredentialResponse(value: unknown): value is { iceServers: RTCIceServer[] } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const servers = (value as { iceServers?: unknown }).iceServers;
+  return (
+    Array.isArray(servers) &&
+    servers.length > 0 &&
+    servers.length <= 8 &&
+    servers.every((server) => {
+      if (typeof server !== 'object' || server === null) return false;
+      const urls = (server as { urls?: unknown }).urls;
+      return (
+        typeof urls === 'string' ||
+        (Array.isArray(urls) && urls.every((url) => typeof url === 'string'))
+      );
+    })
+  );
+}
+
 async function iceServers(): Promise<RTCIceServer[]> {
   if (relay && Date.now() - relay.fetchedAt < refreshRelayMs) return [stun, ...relay.servers];
   try {
     const response = await fetch('/api/turn', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
-    if (response.ok) relay = { servers: (await response.json()).iceServers, fetchedAt: Date.now() };
-    relayProblem = response.ok ? '' : `answered ${response.status}`;
+    const parsed: unknown = await response.json().catch(() => null);
+    if (response.ok && isTurnCredentialResponse(parsed)) {
+      relay = { servers: parsed.iceServers, fetchedAt: Date.now() };
+      relayProblem = '';
+    } else {
+      relay = null;
+      relayProblem = response.ok ? 'unrecognised iceServers shape' : `answered ${response.status}`;
+    }
   } catch (error) {
     // No relay this time; devices can still connect directly where the network allows.
+    relay = null;
     relayProblem = String(error);
   }
   return relay ? [stun, ...relay.servers] : [stun];
@@ -75,6 +101,9 @@ async function pickHost(): Promise<string> {
   }
   return hosts[hosts.length - 1];
 }
+
+/** The reconnect schedule createPeer follows, exported so tests can mirror it. */
+export const reconnectBackoff = { startMs: 3000, maxMs: 60_000 };
 
 /** How this page is set up to connect, for a support report. */
 export function connectionSetup() {
@@ -144,6 +173,9 @@ export async function createPeer(id?: string): Promise<Peer> {
  */
 const heartbeatMs = 5000;
 const silentMs = 15_000;
+
+/** Heartbeat cadence and silence deadline, exported so tests can assert them. */
+export const keepAliveTimings = { heartbeatMs, silentMs };
 
 export function keepAlive(connection: DataConnection) {
   let lastHeard = Date.now();

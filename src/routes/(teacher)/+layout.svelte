@@ -16,6 +16,8 @@
   import ControlDrawer from '#lib/ControlDrawer.svelte';
   import { keepAwake } from '#lib/wakeLock.ts';
   import { mergeSuggestions } from '#lib/merge.ts';
+  import { hubRuntime } from '#lib/hub-runtime.svelte.ts';
+  import { dismissHubMailAlert, hubMail, startHubMailPolling, stopHubMailPolling } from '#lib/hub-mail.svelte.ts';
 
   let { children } = $props();
 
@@ -28,6 +30,26 @@
   let running = $state(false);
   onMount(() => (running = true));
   const ready = $derived(running || !builtInAdvance);
+  const ticOnlyRoute = $derived(
+    ['/roster', '/destinations', '/schedule', '/pass-options', '/kiosk', '/student-link', '/settings'].some(
+      (path) => page.url.pathname === path || page.url.pathname.startsWith(`${path}/`),
+    ) || page.url.pathname.startsWith('/classes'),
+  );
+  const forbiddenForEa = $derived(
+    hubRuntime.hosted && hubRuntime.session?.role === 'ea' && ticOnlyRoute,
+  );
+
+  $effect(() => {
+    if (forbiddenForEa) goto('/', { replace: true });
+  });
+
+  $effect(() => {
+    if (ready && hubRuntime.hosted && hubRuntime.status === 'ready' && hubRuntime.session) {
+      startHubMailPolling();
+      return () => stopHubMailPolling();
+    }
+    stopHubMailPolling();
+  });
 
   /**
    * The teacher's pages are for the teacher's laptop. A paired kiosk device, or
@@ -56,7 +78,7 @@
    * any more, and marks Absent students who never arrived (docs/adr/0020).
    */
   $effect(() => {
-    if (!ready || belongsAtDoor) return;
+    if (!ready || belongsAtDoor || (hubRuntime.hosted && hubRuntime.session?.role !== 'tic')) return;
     const tick = () => {
       keepToSchedule();
       settleRequests();
@@ -138,6 +160,15 @@
           <div class="update">
             <span>Happy Hallways has been updated. Refresh to get the newest version.</span>
             <button class="btn btn-small" onclick={() => leaveTo(location.href)}>Refresh</button>
+          </div>
+        </Toast>
+      {/if}
+      {#if hubRuntime.hosted && hubMail.alertCount}
+        <Toast icon="mail">
+          <div class="update">
+            <span>A new Hub concern is waiting in your Mail Centre. Its note is shown only to authorised recipients.</span>
+            <a class="btn btn-small" href="/mail" onclick={dismissHubMailAlert}>Open Mail</a>
+            <button class="btn btn-small btn-quiet" onclick={dismissHubMailAlert}>Dismiss</button>
           </div>
         </Toast>
       {/if}

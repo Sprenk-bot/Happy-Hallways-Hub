@@ -1,0 +1,23 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... stem.Text.Encoding]::UTF8; bun test src/lib/peer.test.ts 2>&1 | Out-F ...
++                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+src\lib\peer.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+197 | });
+         ^
+error: Unexpected end of file
+    at C:\Users\kcspr\Downloads\Documentation Happy-Hallways-Hub\Happy-Hallways-Hub\src\lib\peer.test.ts:197:4
+-------------------------------
+
+
+ 0 pass
+ 1 fail
+ 1 error
+Ran 1 test across 1 file. [21.00ms]

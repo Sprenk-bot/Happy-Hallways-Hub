@@ -5,7 +5,15 @@
   import { destinationIconGroups } from './icons';
   import Icon from './Icon.svelte';
   import { newId } from './passes';
-  import type { Destination } from './types';
+  import { hubChimeOptions, playHubChime } from './sound';
+  import {
+    isHubKioskChime,
+    type Destination,
+    type HubKioskChime,
+    type HubPromptResponseType,
+    type HubPromptStage,
+    type HubVisitPrompt,
+  } from './types';
 
   /** Edits one destination, or creates one when `destination` is null. */
   let { destination, onClose }: { destination: Destination | null; onClose: () => void } = $props();
@@ -28,6 +36,22 @@
   // svelte-ignore state_referenced_locally
   let countsTowardClass = $state(destination?.countsTowardClassLimit !== false);
   // svelte-ignore state_referenced_locally
+  let informHubAvailable = $state(destination?.informHubAvailable === true);
+  // svelte-ignore state_referenced_locally
+  let kioskAvailable = $state(destination?.kioskAvailable !== false);
+  // svelte-ignore state_referenced_locally
+  let temporaryTripAvailable = $state(destination?.temporaryTripAvailable === true);
+  // svelte-ignore state_referenced_locally
+  let kioskLabel = $state(destination?.kioskLabel ?? '');
+  // svelte-ignore state_referenced_locally
+  let kioskConfirmation = $state(destination?.kioskConfirmation ?? '');
+  // svelte-ignore state_referenced_locally
+  let hubArrivalChime = $state<HubKioskChime>(destination?.hubArrivalChime ?? 'soft');
+  // svelte-ignore state_referenced_locally
+  let arrivalPrompts = $state<HubVisitPrompt[]>(destination?.hubArrivalPrompts?.map((prompt) => ({ ...prompt })) ?? []);
+  // svelte-ignore state_referenced_locally
+  let departurePrompts = $state<HubVisitPrompt[]>(destination?.hubDeparturePrompts?.map((prompt) => ({ ...prompt })) ?? []);
+  // svelte-ignore state_referenced_locally
   let isPrivate = $state(!!destination?.private);
   /** Only the way limits work now is shown; the other way's setting is kept for if the teacher switches back. */
   const hasClassLimit = $derived(account.limitMode === 'class');
@@ -35,6 +59,10 @@
   let error = $state('');
 
   const colorNames = Object.keys(destinationColors) as DestinationColor[];
+  const promptStages: { stage: HubPromptStage; label: string }[] = [
+    { stage: 'arrival', label: 'Arrival prompts' },
+    { stage: 'departure', label: 'Departure / reflection prompts' },
+  ];
 
   let iconSearch = $state('');
   const iconGroups = $derived(
@@ -42,6 +70,96 @@
       .map(([group, names]) => ({ group, names: names.filter((name) => iconMatchesSearch(name, iconSearch)) }))
       .filter((entry) => entry.names.length),
   );
+
+  function promptsFor(stage: HubPromptStage) {
+    return stage === 'arrival' ? arrivalPrompts : departurePrompts;
+  }
+
+  function replacePrompts(stage: HubPromptStage, prompts: HubVisitPrompt[]) {
+    if (stage === 'arrival') arrivalPrompts = prompts;
+    else departurePrompts = prompts;
+  }
+
+  function updatePrompt(
+    stage: HubPromptStage,
+    id: string,
+    changes: Partial<HubVisitPrompt>,
+  ) {
+    replacePrompts(
+      stage,
+      promptsFor(stage).map((prompt) =>
+        prompt.id === id ? { ...prompt, ...changes } : prompt,
+      ),
+    );
+  }
+
+  function addPrompt(stage: HubPromptStage) {
+    const prompts = promptsFor(stage);
+    if (prompts.length >= 8) return;
+    replacePrompts(stage, [
+      ...prompts,
+      {
+        id: newId(),
+        question: '',
+        responseType: 'written',
+        required: false,
+      },
+    ]);
+  }
+
+  function removePrompt(stage: HubPromptStage, id: string) {
+    replacePrompts(stage, promptsFor(stage).filter((prompt) => prompt.id !== id));
+  }
+
+  function movePrompt(stage: HubPromptStage, index: number, direction: -1 | 1) {
+    const prompts = [...promptsFor(stage)];
+    const destinationIndex = index + direction;
+    if (destinationIndex < 0 || destinationIndex >= prompts.length) return;
+    [prompts[index], prompts[destinationIndex]] = [
+      prompts[destinationIndex],
+      prompts[index],
+    ];
+    replacePrompts(stage, prompts);
+  }
+
+  function setPromptResponseType(
+    stage: HubPromptStage,
+    id: string,
+    value: string,
+  ) {
+    if (value !== 'written' && value !== 'rating') return;
+    const responseType: HubPromptResponseType = value;
+    updatePrompt(stage, id, {
+      responseType,
+      ...(responseType === 'rating'
+        ? { scaleMax: 5, ratingStyle: 'numbers' }
+        : {}),
+    });
+  }
+
+  function normalizePrompts(prompts: HubVisitPrompt[]) {
+    return prompts.map((prompt) => ({
+      id: prompt.id,
+      question: prompt.question.trim(),
+      ...(prompt.guidance?.trim()
+        ? { guidance: prompt.guidance.trim() }
+        : {}),
+      responseType: prompt.responseType,
+      required: prompt.required,
+      ...(prompt.responseType === 'rating'
+        ? {
+            scaleMax: prompt.scaleMax ?? 5,
+            ratingStyle: prompt.ratingStyle ?? 'numbers',
+            ...(prompt.minLabel?.trim()
+              ? { minLabel: prompt.minLabel.trim() }
+              : {}),
+            ...(prompt.maxLabel?.trim()
+              ? { maxLabel: prompt.maxLabel.trim() }
+              : {}),
+          }
+        : {}),
+    })) satisfies HubVisitPrompt[];
+  }
 
   function save(event: SubmitEvent) {
     event.preventDefault();
@@ -59,11 +177,85 @@
       error = 'Minutes should be between 1 and 120, or left empty for no time limit.';
       return;
     }
+    if (kioskLabel.trim().length > 60) {
+      error = 'The student-facing label must be 60 characters or fewer.';
+      return;
+    }
+    if (kioskConfirmation.trim().length > 160) {
+      error = 'The Hub kiosk confirmation must be 160 characters or fewer.';
+      return;
+    }
+    for (const prompt of [...arrivalPrompts, ...departurePrompts]) {
+      if (!prompt.question.trim() || prompt.question.trim().length > 240) {
+        error = 'Each Hub prompt needs a question of 1–240 characters.';
+        return;
+      }
+      if ((prompt.guidance?.trim().length ?? 0) > 240) {
+        error = 'Prompt guidance must be 240 characters or fewer.';
+        return;
+      }
+      if (
+        prompt.responseType === 'rating' &&
+        prompt.scaleMax !== undefined &&
+        prompt.scaleMax !== 5 &&
+        prompt.scaleMax !== 10
+      ) {
+        error = 'A rating scale must use 1–5 or 1–10.';
+        return;
+      }
+      if (
+        (prompt.minLabel?.trim().length ?? 0) > 60 ||
+        (prompt.maxLabel?.trim().length ?? 0) > 60
+      ) {
+        error = 'Rating labels must be 60 characters or fewer.';
+        return;
+      }
+    }
     // A Private destination never has a limit or a line (docs/adr/0021).
     const saved: Destination = { id: destination?.id ?? newId(), label: name, minutes: limit, color, icon, limit: isPrivate ? null : studentLimit };
+    const savedArrivalPrompts = normalizePrompts(arrivalPrompts);
+    const savedDeparturePrompts = normalizePrompts(departurePrompts);
+    const promptsChanged =
+      JSON.stringify(savedArrivalPrompts) !==
+        JSON.stringify(destination?.hubArrivalPrompts ?? []) ||
+      JSON.stringify(savedDeparturePrompts) !==
+        JSON.stringify(destination?.hubDeparturePrompts ?? []);
+    const hasPromptConfiguration =
+      savedArrivalPrompts.length > 0 ||
+      savedDeparturePrompts.length > 0 ||
+      destination?.hubPromptVersion !== undefined;
+    if (hasPromptConfiguration) {
+      saved.hubPromptVersion = destination
+        ? (destination.hubPromptVersion ?? 1) + (promptsChanged ? 1 : 0)
+        : 1;
+    }
+    if (savedArrivalPrompts.length) {
+      saved.hubArrivalPrompts = savedArrivalPrompts;
+    } else {
+      delete saved.hubArrivalPrompts;
+    }
+    if (savedDeparturePrompts.length) {
+      saved.hubDeparturePrompts = savedDeparturePrompts;
+    } else {
+      delete saved.hubDeparturePrompts;
+    }
     if (!counts) saved.countsTowardAllowance = false;
     if (!countsTowardClass || isPrivate) saved.countsTowardClassLimit = false;
     if (isPrivate) saved.private = true;
+    if (informHubAvailable) saved.informHubAvailable = true;
+    else delete saved.informHubAvailable;
+    if (!kioskAvailable) saved.kioskAvailable = false;
+    else delete saved.kioskAvailable;
+    if (kioskAvailable && temporaryTripAvailable) saved.temporaryTripAvailable = true;
+    else delete saved.temporaryTripAvailable;
+    const safeKioskLabel = kioskLabel.trim();
+    if (isPrivate && safeKioskLabel) saved.kioskLabel = safeKioskLabel;
+    else delete saved.kioskLabel;
+    const safeKioskConfirmation = kioskConfirmation.trim();
+    if (safeKioskConfirmation) saved.kioskConfirmation = safeKioskConfirmation;
+    else delete saved.kioskConfirmation;
+    if (hubArrivalChime !== 'soft') saved.hubArrivalChime = hubArrivalChime;
+    else delete saved.hubArrivalChime;
     saveDestination(saved);
     onClose();
   }
@@ -158,6 +350,41 @@
           </span>
         </label>
         {#if isPrivate}
+          <label class="field">
+            Student-facing private label (optional)
+            <input bind:value={kioskLabel} maxlength="60" placeholder="Private destination" />
+            <span class="muted small">Use a label students may safely see. If blank, the Hub kiosk shows “Private destination”.</span>
+          </label>
+        {/if}
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={kioskAvailable}
+            onchange={(event) => {
+              kioskAvailable = event.currentTarget.checked;
+              if (!kioskAvailable) temporaryTripAvailable = false;
+            }}
+          />
+          <span>
+            Available on the Hub kiosk
+            <span class="muted small">This is separate from availability in classroom Inform the Hub.</span>
+          </span>
+        </label>
+        <label class="check">
+          <input type="checkbox" bind:checked={temporaryTripAvailable} disabled={!kioskAvailable} />
+          <span>
+            Available as a Temporary Trip
+            <span class="muted small">Students can choose this while already signed in at the Hub.</span>
+          </span>
+        </label>
+        <label class="check">
+          <input type="checkbox" bind:checked={informHubAvailable} />
+          <span>
+            Available in Inform the Hub
+            <span class="muted small">Only enabled destinations can be selected for a classroom Hub notification.</span>
+          </span>
+        </label>
+        {#if isPrivate}
           <!-- No limit or line to set: a line would show the room who's going here. -->
         {:else if hasClassLimit}
           <label class="check">
@@ -186,6 +413,134 @@
             </span>
           </label>
         {/if}
+        <label class="field">
+          Hub kiosk confirmation message (optional)
+          <textarea
+            bind:value={kioskConfirmation}
+            maxlength="160"
+            rows="3"
+            placeholder="Your arrival was saved. Take a moment to settle in."
+          ></textarea>
+          <span class="muted small">Shown after the Hub Host saves an arrival. Keep this message safe for a shared student screen.</span>
+        </label>
+        <div class="field">
+          <label for="hub-arrival-chime">Hub kiosk arrival chime</label>
+          <div class="row">
+            <select
+              id="hub-arrival-chime"
+              value={hubArrivalChime}
+              onchange={(event) => {
+                const value = event.currentTarget.value;
+                if (isHubKioskChime(value)) hubArrivalChime = value;
+              }}
+            >
+              {#each hubChimeOptions as option (option.value)}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+            <button
+              type="button"
+              class="btn"
+              disabled={hubArrivalChime === 'none' || account.hubKioskSoundSettings?.muted === true}
+              onclick={() => playHubChime(hubArrivalChime, account.hubKioskSoundSettings?.volume ?? 70)}
+            >Preview</button>
+          </div>
+          <span class="muted small">Played on the Hub kiosk only after the Host accepts an arrival.</span>
+        </div>
+        {#each promptStages as group (group.stage)}
+          <details class="hub-prompt-section">
+            <summary>{group.label} ({promptsFor(group.stage).length})</summary>
+            <p class="muted small">Questions are saved with a version so future edits won't change earlier answers. Each stage supports up to eight prompts.</p>
+            {#each promptsFor(group.stage) as prompt, index (prompt.id)}
+              <fieldset class="hub-prompt-editor">
+                <legend>Prompt {index + 1}</legend>
+                <label class="field">
+                  Question
+                  <input
+                    value={prompt.question}
+                    maxlength="240"
+                    oninput={(event) => updatePrompt(group.stage, prompt.id, { question: event.currentTarget.value })}
+                  />
+                </label>
+                <label class="field">
+                  Guidance (optional)
+                  <textarea
+                    value={prompt.guidance ?? ''}
+                    maxlength="240"
+                    rows="2"
+                    oninput={(event) => updatePrompt(group.stage, prompt.id, { guidance: event.currentTarget.value })}
+                  ></textarea>
+                </label>
+                <label class="field">
+                  Response type
+                  <select
+                    value={prompt.responseType}
+                    onchange={(event) => setPromptResponseType(group.stage, prompt.id, event.currentTarget.value)}
+                  >
+                    <option value="written">Written response</option>
+                    <option value="rating">Visual rating</option>
+                  </select>
+                </label>
+                {#if prompt.responseType === 'rating'}
+                  <label class="field">
+                    Rating scale
+                    <select
+                      value={prompt.scaleMax ?? 5}
+                      onchange={(event) => updatePrompt(group.stage, prompt.id, { scaleMax: Number(event.currentTarget.value) === 10 ? 10 : 5 })}
+                    >
+                      <option value="5">1–5</option>
+                      <option value="10">1–10</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    Rating display
+                    <select
+                      value={prompt.ratingStyle ?? 'numbers'}
+                      onchange={(event) => updatePrompt(group.stage, prompt.id, { ratingStyle: event.currentTarget.value === 'stars' ? 'stars' : 'numbers' })}
+                    >
+                      <option value="numbers">Numbers</option>
+                      <option value="stars">Stars</option>
+                    </select>
+                  </label>
+                  <div class="row">
+                    <label class="field">
+                      Lowest label
+                      <input
+                        value={prompt.minLabel ?? ''}
+                        maxlength="60"
+                        oninput={(event) => updatePrompt(group.stage, prompt.id, { minLabel: event.currentTarget.value })}
+                      />
+                    </label>
+                    <label class="field">
+                      Highest label
+                      <input
+                        value={prompt.maxLabel ?? ''}
+                        maxlength="60"
+                        oninput={(event) => updatePrompt(group.stage, prompt.id, { maxLabel: event.currentTarget.value })}
+                      />
+                    </label>
+                  </div>
+                {/if}
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    checked={prompt.required}
+                    onchange={(event) => updatePrompt(group.stage, prompt.id, { required: event.currentTarget.checked })}
+                  />
+                  <span>Response required</span>
+                </label>
+                <div class="row">
+                  <button type="button" class="btn" aria-label={`Move prompt ${index + 1} up`} disabled={index === 0} onclick={() => movePrompt(group.stage, index, -1)}>Move up</button>
+                  <button type="button" class="btn" aria-label={`Move prompt ${index + 1} down`} disabled={index === promptsFor(group.stage).length - 1} onclick={() => movePrompt(group.stage, index, 1)}>Move down</button>
+                  <button type="button" class="btn btn-danger" onclick={() => removePrompt(group.stage, prompt.id)}>Remove</button>
+                </div>
+              </fieldset>
+            {:else}
+              <p class="muted small">No {group.stage} prompts are configured.</p>
+            {/each}
+            <button type="button" class="btn" disabled={promptsFor(group.stage).length >= 8} onclick={() => addPrompt(group.stage)}>Add {group.stage} prompt</button>
+          </details>
+        {/each}
       </div>
     </div>
 
@@ -242,6 +597,41 @@
   .dest-rules {
     padding-left: 28px;
     border-left: 1px solid var(--border);
+  }
+
+  .hub-prompt-section {
+    display: grid;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .hub-prompt-section > summary {
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .hub-prompt-section > p {
+    margin: 0;
+  }
+
+  .hub-prompt-editor {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .hub-prompt-editor legend {
+    padding: 0 4px;
+    font-weight: 700;
+  }
+
+  .hub-prompt-editor .row > .field {
+    flex: 1 1 140px;
   }
 
   @media (max-width: 720px) {

@@ -1,0 +1,1062 @@
+{
+  "rootFolder": "c:\\Users\\kcspr\\Downloads\\Documentation Happy-Hallways-Hub\\Happy-Hallways-Hub",
+  "analyzedAt": "2026-11-13T03:16:57.547Z",
+  "rootStructure": [
+    {
+      "name": ".gitignore",
+      "type": "file",
+      "size": 627,
+      "lines": 32
+    },
+    {
+      "name": "AGENTS.md",
+      "type": "file",
+      "size": 3937,
+      "lines": 30
+    },
+    {
+      "name": "api",
+      "type": "dir"
+    },
+    {
+      "name": "build",
+      "type": "dir"
+    },
+    {
+      "name": "bun.lock",
+      "type": "file",
+      "size": 25651,
+      "lines": 255
+    },
+    {
+      "name": "CONTEXT.md",
+      "type": "file",
+      "size": 17409,
+      "lines": 331
+    },
+    {
+      "name": "demo",
+      "type": "dir"
+    },
+    {
+      "name": "docs",
+      "type": "dir"
+    },
+    {
+      "name": "hub-host",
+      "type": "dir"
+    },
+    {
+      "name": "LICENSE.txt",
+      "type": "file",
+      "size": 11576,
+      "lines": 202
+    },
+    {
+      "name": "node_modules",
+      "type": "dir"
+    },
+    {
+      "name": "overview.json",
+      "type": "file",
+      "size": 24726,
+      "lines": 933
+    },
+    {
+      "name": "overview_architecture.puml",
+      "type": "file",
+      "size": 246,
+      "lines": 7
+    },
+    {
+      "name": "package.json",
+      "type": "file",
+      "size": 1407,
+      "lines": 44
+    },
+    {
+      "name": "playwright.config.ts",
+      "type": "file",
+      "size": 274,
+      "lines": 9
+    },
+    {
+      "name": "playwright.guides.config.ts",
+      "type": "file",
+      "size": 509,
+      "lines": 13
+    },
+    {
+      "name": "README.md",
+      "type": "file",
+      "size": 5035,
+      "lines": 110
+    },
+    {
+      "name": "scripts",
+      "type": "dir"
+    },
+    {
+      "name": "SECURITY.md",
+      "type": "file",
+      "size": 8569,
+      "lines": 141
+    },
+    {
+      "name": "src",
+      "type": "dir"
+    },
+    {
+      "name": "static",
+      "type": "dir"
+    },
+    {
+      "name": "test-results",
+      "type": "dir"
+    },
+    {
+      "name": "tests",
+      "type": "dir"
+    },
+    {
+      "name": "tsconfig.json",
+      "type": "file",
+      "size": 250,
+      "lines": 12
+    },
+    {
+      "name": "vercel.json",
+      "type": "file",
+      "size": 173,
+      "lines": 7
+    },
+    {
+      "name": "vite.config.ts",
+      "type": "file",
+      "size": 1861,
+      "lines": 47
+    }
+  ],
+  "rootFileSnippets": {
+    "AGENTS.md": [
+      "# Happy Hallways Hub project instructions",
+      "",
+      "## Product authority",
+      "",
+      "- Before Hub-related work, read `docs/Happy_Hallways_Hub_Edition_Master_Specification.md` and the existing UI reference pack. The specification is the authoritative requirements source. If either is missing, check for the user-supplied copy beside the repository; if still unavailable, ask before making assumptions.",
+      "- Preserve existing Happy Hallways behaviour, screens, navigation, visual identity and reusable components wherever possible. Extend existing features before replacing them. Keep ordinary classroom passes separate from Hub visits and movement events.",
+      "- Update the master specification only when the user explicitly approves a requirements change.",
+      "",
+      "## Approved direction and fallbacks",
+      ""
+    ],
+    "bun.lock": [
+      "{",
+      "\"lockfileVersion\": 1,",
+      "\"configVersion\": 1,",
+      "\"workspaces\": {",
+      "\"\": {",
+      "\"name\": \"cute-dog-sample\",",
+      "\"dependencies\": {",
+      "\"@azure/msal-node\": \"^7.2.1\",",
+      "\"peerjs\": \"^1.5.5\",",
+      "\"qrcode-generator\": \"^2.0.4\","
+    ],
+    "CONTEXT.md": [
+      "# Happy Hallways",
+      "",
+      "Happy Hallways records students leaving the classroom and coming back. A kiosk by the",
+      "door signs them out and in; the teacher watches from their own laptop. Everything",
+      "lives on the teacher's own devices; there is no server and no sign-in.",
+      "",
+      "## Language",
+      "",
+      "**Class**:",
+      "A group of students from the teacher's Roster seen together during one period."
+    ],
+    "LICENSE.txt": [
+      "Apache License",
+      "Version 2.0, January 2004",
+      "http://www.apache.org/licenses/",
+      "",
+      "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION",
+      "",
+      "1. Definitions.",
+      "",
+      "\"License\" shall mean the terms and conditions for use, reproduction,",
+      "and distribution as defined by Sections 1 through 9 of this document."
+    ],
+    "overview.json": [
+      "{",
+      "\"rootFolder\": \"c:\\\\Users\\\\kcspr\\\\Downloads\\\\Documentation Happy-Hallways-Hub\\\\Happy-Hallways-Hub\",",
+      "\"analyzedAt\": \"2026-11-12T16:07:17.942Z\",",
+      "\"rootStructure\": [",
+      "{",
+      "\"name\": \".gitignore\",",
+      "\"type\": \"file\",",
+      "\"size\": 627,",
+      "\"lines\": 32",
+      "},"
+    ],
+    "overview_architecture.puml": [
+      "@startuml",
+      "' Generated by SASVA Maria on 2026-11-12T16:07:32.971Z",
+      "' ERROR: Diagram generation failed",
+      "",
+      "note \"Architecture Diagram Generation Failed\\n\\nError: No chat model configured\\n\\nPlease check the logs for more details.\" as ErrorNote",
+      "",
+      "@enduml"
+    ],
+    "package.json": [
+      "{",
+      "\"name\": \"hallway-pass-tracker\",",
+      "\"version\": \"0.0.0\",",
+      "\"devDependencies\": {",
+      "\"@playwright/test\": \"^1.61.1\",",
+      "\"@sveltejs/adapter-static\": \"^4.0.0\",",
+      "\"@sveltejs/kit\": \"^3.0.0\",",
+      "\"@sveltejs/vite-plugin-svelte\": \"^7.3.1\",",
+      "\"@types/node\": \"^26.6.4\",",
+      "\"lucide\": \"^1.50.0\","
+    ],
+    "playwright.config.ts": [
+      "import { defineConfig } from '@playwright/test';",
+      "",
+      "export default defineConfig({",
+      "testDir: 'tests',",
+      "timeout: 90_000,",
+      "use: { baseURL: 'http://localhost:8000' },",
+      "webServer: { command: 'bun run dev', url: 'http://localhost:8000', reuseExistingServer: true },",
+      "});",
+      ""
+    ],
+    "playwright.guides.config.ts": [
+      "import { defineConfig } from '@playwright/test';",
+      "",
+      "/**",
+      "* Takes the screenshots for the Guides (`bun run guides:screenshots`), apart",
+      "* from the tests so they only change when someone asks for new pictures.",
+      "*/",
+      "export default defineConfig({",
+      "testDir: 'scripts/guides',",
+      "timeout: 90_000,",
+      "use: { baseURL: 'http://localhost:8000', viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 },"
+    ],
+    "README.md": [
+      "# Happy Hallways",
+      "",
+      "A classroom hall pass, at [happyhallways.com](https://happyhallways.com). A kiosk",
+      "by the door lets students sign themselves out and back in; the teacher sees who",
+      "is out, and how much class time each student misses, from their own laptop.",
+      "",
+      "## How the pieces fit together",
+      "",
+      "Happy Hallways has **no server and no accounts**. It is a SvelteKit app that runs",
+      "entirely in the browser:"
+    ],
+    "SECURITY.md": [
+      "# Hallway Security Model",
+      "",
+      "Hallway is a local-first prototype. There is no server holding student data:",
+      "each teacher's Roster, classes and passes live in their own browser's local",
+      "storage, and that browser (the teacher's computer) decides everything at the",
+      "door. See `docs/adr/0014-the-teachers-computer-is-the-only-source-of-truth.md`.",
+      "",
+      "**No student data on any server we run** is a hard rule for every",
+      "student-facing feature (`docs/adr/0016`).",
+      ""
+    ],
+    "tsconfig.json": [
+      "{",
+      "\"extends\": \"$app/tsconfig\",",
+      "\"include\": [\"src\", \"test\", \"hub-host\", \"*\"],",
+      "\"exclude\": [\"src/service-worker\"],",
+      "\"compilerOptions\": {",
+      "\"strict\": true,",
+      "\"noUnusedLocals\": true,",
+      "\"noUnusedParameters\": true,",
+      "\"skipLibCheck\": true",
+      "}"
+    ],
+    "vercel.json": [
+      "{",
+      "\"$schema\": \"https://openapi.vercel.sh/vercel.json\",",
+      "\"outputDirectory\": \"build\",",
+      "\"cleanUrls\": true,",
+      "\"rewrites\": [{ \"source\": \"/(.*)\", \"destination\": \"/\" }]",
+      "}",
+      ""
+    ],
+    "vite.config.ts": [
+      "import adapter from '@sveltejs/adapter-static';",
+      "import { sveltekit } from '@sveltejs/kit/vite';",
+      "import { defineConfig, loadEnv, type Plugin } from 'vite';",
+      "import { GET as turnLogins } from './api/turn.ts';",
+      "",
+      "/**",
+      "* On Vercel, api/turn.ts runs as its own function. During `vite dev` there is",
+      "* no Vercel, so this answers /api/turn the same way, using TURN_KEY_ID and",
+      "* TURN_KEY_API_TOKEN from .env.local.",
+      "*/"
+    ]
+  },
+  "importantFolders": [
+    {
+      "path": ".svelte-kit\\generated\\dev\\client",
+      "category": "frontend",
+      "fileCount": 36,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\generated\\dev\\env\\public",
+      "category": "assets",
+      "fileCount": 2,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output",
+      "category": "build",
+      "fileCount": 403,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\client",
+      "category": "frontend",
+      "fileCount": 147,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\client\\guides",
+      "category": "frontend",
+      "fileCount": 15
+    },
+    {
+      "path": ".svelte-kit\\output\\client\\_app",
+      "category": "frontend",
+      "fileCount": 125,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\client\\_app\\immutable\\assets",
+      "category": "assets",
+      "fileCount": 41
+    },
+    {
+      "path": ".svelte-kit\\output\\prerendered\\pages\\guides",
+      "category": "frontend",
+      "fileCount": 2
+    },
+    {
+      "path": ".svelte-kit\\output\\server",
+      "category": "backend",
+      "fileCount": 249,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\server\\entries\\pages\\(teacher)\\about",
+      "category": "build",
+      "fileCount": 4,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\server\\entries\\pages\\(teacher)\\classes\\_id_\\settings",
+      "category": "config",
+      "fileCount": 2,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\server\\entries\\pages\\(teacher)\\settings",
+      "category": "config",
+      "fileCount": 6,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\server\\entries\\pages\\(teacher)\\settings\\guides",
+      "category": "frontend",
+      "fileCount": 2,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\server\\entries\\pages\\guides",
+      "category": "frontend",
+      "fileCount": 10,
+      "primaryLanguage": "JavaScript"
+    },
+    {
+      "path": ".svelte-kit\\output\\server\\_app",
+      "category": "frontend",
+      "fileCount": 41
+    },
+    {
+      "path": ".svelte-kit\\output\\server\\_app\\immutable\\assets",
+      "category": "assets",
+      "fileCount": 41
+    },
+    {
+      "path": ".svelte-kit\\types\\src\\routes",
+      "category": "build",
+      "fileCount": 31,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": ".svelte-kit\\types\\src\\routes\\(teacher)\\about",
+      "category": "build",
+      "fileCount": 1,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": ".svelte-kit\\types\\src\\routes\\(teacher)\\classes\\[id]\\settings",
+      "category": "config",
+      "fileCount": 1,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": ".svelte-kit\\types\\src\\routes\\(teacher)\\settings",
+      "category": "config",
+      "fileCount": 3,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": ".svelte-kit\\types\\src\\routes\\(teacher)\\settings\\guides",
+      "category": "frontend",
+      "fileCount": 1,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": ".svelte-kit\\types\\src\\routes\\guides",
+      "category": "frontend",
+      "fileCount": 3,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": "api",
+      "category": "backend",
+      "fileCount": 1,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": "demo",
+      "category": "examples",
+      "fileCount": 1
+    },
+    {
+      "path": "docs",
+      "category": "docs",
+      "fileCount": 24
+    },
+    {
+      "path": "scripts",
+      "category": "scripts",
+      "fileCount": 7,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": "scripts\\guides",
+      "category": "frontend",
+      "fileCount": 3,
+      "primaryLanguage": "TypeScript"
+    },
+    {
+      "path": "src\\lib",
+      "category": "core",
+      "fileCount": 84,
+      "primaryLanguage": "Svelte"
+    },
+    {
+      "path": "src\\routes",
+      "category": "build",
+      "fileCount": 40,
+      "primaryLanguage": "Svelte"
+    },
+    {
+      "path": "src\\routes\\(teacher)\\about",
+      "category": "build",
+      "fileCount": 2,
+      "primaryLanguage": "Svelte"
+    },
+    {
+      "path": "src\\routes\\(teacher)\\classes\\[id]\\settings",
+      "category": "config",
+      "fileCount": 1,
+      "primaryLanguage": "Svelte"
+    },
+    {
+      "path": "src\\routes\\(teacher)\\settings",
+      "category": "config",
+      "fileCount": 3,
+      "primaryLanguage": "Svelte"
+    },
+    {
+      "path": "src\\routes\\(teacher)\\settings\\guides",
+      "category": "frontend",
+      "fileCount": 1,
+      "primaryLanguage": "Svelte"
+    },
+    {
+      "path": "src\\routes\\guides",
+      "category": "frontend",
+      "fileCount": 5,
+      "primaryLanguage": "Svelte"
+    },
+    {
+      "path": "static",
+      "category": "assets",
+      "fileCount": 21
+    },
+    {
+      "path": "static\\guides",
+      "category": "frontend",
+      "fileCount": 15
+    },
+    {
+      "path": "test-results",
+      "category": "tests",
+      "fileCount": 96
+    },
+    {
+      "path": "test-results\\class-settings-a-class-s-s-e4c58-nts-and-save-as-they-change",
+      "category": "config",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\class-settings-a-class-tha-af816--it-over-to-the-one-setting",
+      "category": "config",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\class-settings-a-device-th-2c8a4-ver-sent-a-name-only-counts",
+      "category": "config",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\class-settings-attendance--1fb3c-every-class-in-Pass-Options",
+      "category": "config",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\data-safety-7-pasting-a-cl-abcf4--the-teacher-didn-t-confirm",
+      "category": "config",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\data-safety-8-passes-an-ol-749d3-nt-out-on-one-can-come-back",
+      "category": "build",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\data-safety-9-the-teacher--ffe02-s-an-outdated-one-to-reload",
+      "category": "build",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\hallway-a-blocked-student--ddfb1--approves-or-denies-on-Home",
+      "category": "frontend",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\hallway-a-student-in-line--18fa7--without-the-kiosk-crashing",
+      "category": "build",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\hallway-a-student-who-can--9b124-Time-without-joining-a-line",
+      "category": "build",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\hallway-pop-ups-close-with-Escape-or-a-click-outside",
+      "category": "build",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\hallway-with-PINs-off-tapp-4d913-traight-to-the-destinations",
+      "category": "frontend",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\onboarding--whats-new-prev-f53e6-without-counting-it-as-seen",
+      "category": "build",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\usability-a-pass-tapped-by-2d54d-nd-the-student-gets-it-back",
+      "category": "frontend",
+      "fileCount": 1
+    },
+    {
+      "path": "test-results\\usability-the-teacher-adds-45eb6-out-and-clears-it-from-Home",
+      "category": "build",
+      "fileCount": 1
+    },
+    {
+      "path": "tests",
+      "category": "tests",
+      "fileCount": 9,
+      "primaryLanguage": "TypeScript"
+    }
+  ],
+  "readmeParagraphs": {
+    "hub-host": "# Hub Host development prototype",
+    "root": "# Happy Hallways\r\n\r\nA classroom hall pass, at [happyhallways.com](https://happyhallways.com). A kiosk\r"
+  },
+  "totals": {
+    "numFiles": 797,
+    "numDirs": 252,
+    "totalSizeBytes": 9658530,
+    "totalLinesOfCode": 56082
+  },
+  "fileCategories": {
+    "other": 222,
+    "source": 435,
+    "config": 13,
+    "documentation": 127
+  },
+  "linesOfCodePerLanguage": {
+    "JavaScript": 22221,
+    "TypeScript": 19309,
+    "PowerShell": 76,
+    "Svelte": 14476
+  },
+  "filesPerLanguage": {
+    "JavaScript": 249,
+    "TypeScript": 104,
+    "PowerShell": 2,
+    "Svelte": 80
+  },
+  "projectTypes": [
+    "JavaScript/Node.js"
+  ],
+  "frameworks": [
+    "Svelte",
+    "Vite"
+  ],
+  "entryPoints": [],
+  "ciCdTools": [],
+  "packageManagers": [
+    "npm/yarn"
+  ],
+  "topLevelDirectories": [
+    {
+      "name": "src",
+      "numFiles": 127,
+      "totalLoc": 22373,
+      "dominantLanguage": "Svelte"
+    },
+    {
+      "name": "hub-host",
+      "numFiles": 16,
+      "totalLoc": 6636,
+      "dominantLanguage": "TypeScript"
+    },
+    {
+      "name": "tests",
+      "numFiles": 9,
+      "totalLoc": 3398,
+      "dominantLanguage": "TypeScript"
+    },
+    {
+      "name": "scripts",
+      "numFiles": 7,
+      "totalLoc": 702,
+      "dominantLanguage": "TypeScript"
+    },
+    {
+      "name": "api",
+      "numFiles": 1,
+      "totalLoc": 66,
+      "dominantLanguage": "TypeScript"
+    },
+    {
+      "name": "demo",
+      "numFiles": 1,
+      "totalLoc": 0
+    },
+    {
+      "name": "docs",
+      "numFiles": 24,
+      "totalLoc": 0
+    },
+    {
+      "name": "static",
+      "numFiles": 21,
+      "totalLoc": 0
+    },
+    {
+      "name": "test-results",
+      "numFiles": 96,
+      "totalLoc": 0
+    }
+  ],
+  "detailedDirectories": [
+    {
+      "path": "src",
+      "name": "src",
+      "level": 1,
+      "numFiles": 127,
+      "totalLoc": 22373,
+      "dominantLanguage": "Svelte",
+      "category": "General",
+      "description": "General module with 127 files (Svelte)",
+      "subdirectories": [
+        {
+          "path": "src\\lib",
+          "name": "lib",
+          "level": 2,
+          "numFiles": 84,
+          "totalLoc": 13753,
+          "dominantLanguage": "Svelte",
+          "category": "Library",
+          "description": "Library module with 84 files (Svelte)",
+          "subdirectories": [
+            {
+              "path": "src\\lib\\welcome",
+              "name": "welcome",
+              "level": 3,
+              "numFiles": 3,
+              "totalLoc": 249,
+              "dominantLanguage": "Svelte",
+              "category": "General",
+              "description": "General module with 3 files (Svelte)",
+              "subdirectories": []
+            },
+            {
+              "path": "src\\lib\\news-art",
+              "name": "news-art",
+              "level": 3,
+              "numFiles": 4,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 4 files",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "src\\routes",
+          "name": "routes",
+          "level": 2,
+          "numFiles": 40,
+          "totalLoc": 8607,
+          "dominantLanguage": "Svelte",
+          "category": "General",
+          "description": "General module with 40 files (Svelte)",
+          "subdirectories": [
+            {
+              "path": "src\\routes\\(teacher)",
+              "name": "(teacher)",
+              "level": 3,
+              "numFiles": 23,
+              "totalLoc": 4607,
+              "dominantLanguage": "Svelte",
+              "category": "General",
+              "description": "General module with 23 files (Svelte)",
+              "subdirectories": []
+            },
+            {
+              "path": "src\\routes\\door",
+              "name": "door",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 1261,
+              "dominantLanguage": "Svelte",
+              "category": "General",
+              "description": "General module with 1 files (Svelte)",
+              "subdirectories": []
+            },
+            {
+              "path": "src\\routes\\join",
+              "name": "join",
+              "level": 3,
+              "numFiles": 2,
+              "totalLoc": 903,
+              "dominantLanguage": "Svelte",
+              "category": "General",
+              "description": "General module with 2 files (Svelte)",
+              "subdirectories": []
+            },
+            {
+              "path": "src\\routes\\hub-admin",
+              "name": "hub-admin",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 593,
+              "dominantLanguage": "Svelte",
+              "category": "General",
+              "description": "General module with 1 files (Svelte)",
+              "subdirectories": []
+            },
+            {
+              "path": "src\\routes\\guides",
+              "name": "guides",
+              "level": 3,
+              "numFiles": 5,
+              "totalLoc": 505,
+              "dominantLanguage": "Svelte",
+              "category": "Web/UI",
+              "description": "Web/UI module with 5 files (Svelte)",
+              "subdirectories": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "hub-host",
+      "name": "hub-host",
+      "level": 1,
+      "numFiles": 16,
+      "totalLoc": 6636,
+      "dominantLanguage": "TypeScript",
+      "category": "General",
+      "description": "# Hub Host development prototype",
+      "subdirectories": []
+    },
+    {
+      "path": "tests",
+      "name": "tests",
+      "level": 1,
+      "numFiles": 9,
+      "totalLoc": 3398,
+      "dominantLanguage": "TypeScript",
+      "category": "Testing",
+      "description": "Testing module with 9 files (TypeScript)",
+      "subdirectories": []
+    },
+    {
+      "path": "scripts",
+      "name": "scripts",
+      "level": 1,
+      "numFiles": 7,
+      "totalLoc": 702,
+      "dominantLanguage": "TypeScript",
+      "category": "Tools/Scripts",
+      "description": "Tools/Scripts module with 7 files (TypeScript)",
+      "subdirectories": [
+        {
+          "path": "scripts\\guides",
+          "name": "guides",
+          "level": 2,
+          "numFiles": 3,
+          "totalLoc": 287,
+          "dominantLanguage": "TypeScript",
+          "category": "Web/UI",
+          "description": "Web/UI module with 3 files (TypeScript)",
+          "subdirectories": []
+        }
+      ]
+    },
+    {
+      "path": "test-results",
+      "name": "test-results",
+      "level": 1,
+      "numFiles": 96,
+      "totalLoc": 0,
+      "category": "Testing",
+      "description": "Testing module with 96 files",
+      "subdirectories": [
+        {
+          "path": "test-results\\attendance-a-kiosk-that-ca-2bd73--Arrival-to-hand-over-later",
+          "name": "attendance-a-kiosk-that-ca-2bd73--Arrival-to-hand-over-later",
+          "level": 2,
+          "numFiles": 1,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 1 files",
+          "subdirectories": []
+        },
+        {
+          "path": "test-results\\attendance-a-student-who-n-ef7d1-em-arrived-makes-them-Tardy",
+          "name": "attendance-a-student-who-n-ef7d1-em-arrived-makes-them-Tardy",
+          "level": 2,
+          "numFiles": 1,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 1 files",
+          "subdirectories": []
+        },
+        {
+          "path": "test-results\\attendance-an-Absent-stude-ca1b1-kiosk-listing-who-is-Absent",
+          "name": "attendance-an-Absent-stude-ca1b1-kiosk-listing-who-is-Absent",
+          "level": 2,
+          "numFiles": 1,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 1 files",
+          "subdirectories": []
+        },
+        {
+          "path": "test-results\\attendance-students-tap-in-3eb1a--but-the-door-never-says-so",
+          "name": "attendance-students-tap-in-3eb1a--but-the-door-never-says-so",
+          "level": 2,
+          "numFiles": 1,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 1 files",
+          "subdirectories": []
+        },
+        {
+          "path": "test-results\\attendance-with-Attendance-060c5--kiosk-shows-no-arrival-tap",
+          "name": "attendance-with-Attendance-060c5--kiosk-shows-no-arrival-tap",
+          "level": 2,
+          "numFiles": 1,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 1 files",
+          "subdirectories": []
+        }
+      ]
+    },
+    {
+      "path": "api",
+      "name": "api",
+      "level": 1,
+      "numFiles": 1,
+      "totalLoc": 66,
+      "dominantLanguage": "TypeScript",
+      "category": "Service",
+      "description": "Service module with 1 files (TypeScript)",
+      "subdirectories": []
+    },
+    {
+      "path": "docs",
+      "name": "docs",
+      "level": 1,
+      "numFiles": 24,
+      "totalLoc": 0,
+      "category": "Documentation",
+      "description": "Documentation module with 24 files",
+      "subdirectories": [
+        {
+          "path": "docs\\adr",
+          "name": "adr",
+          "level": 2,
+          "numFiles": 24,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 24 files",
+          "subdirectories": []
+        }
+      ]
+    },
+    {
+      "path": "static",
+      "name": "static",
+      "level": 1,
+      "numFiles": 21,
+      "totalLoc": 0,
+      "category": "General",
+      "description": "General module with 21 files",
+      "subdirectories": [
+        {
+          "path": "static\\guides",
+          "name": "guides",
+          "level": 2,
+          "numFiles": 15,
+          "totalLoc": 0,
+          "category": "Web/UI",
+          "description": "Web/UI module with 15 files",
+          "subdirectories": [
+            {
+              "path": "static\\guides\\schedule-no-pass-times",
+              "name": "schedule-no-pass-times",
+              "level": 3,
+              "numFiles": 8,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 8 files",
+              "subdirectories": []
+            },
+            {
+              "path": "static\\guides\\separate-bathroom-lines",
+              "name": "separate-bathroom-lines",
+              "level": 3,
+              "numFiles": 7,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 7 files",
+              "subdirectories": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "demo",
+      "name": "demo",
+      "level": 1,
+      "numFiles": 1,
+      "totalLoc": 0,
+      "category": "General",
+      "description": "General module with 1 files",
+      "subdirectories": []
+    }
+  ],
+  "architecturalInsights": {
+    "coreApplications": [
+      {
+        "path": "api",
+        "name": "api",
+        "level": 1,
+        "numFiles": 1,
+        "totalLoc": 66,
+        "dominantLanguage": "TypeScript",
+        "category": "Service",
+        "description": "Service module with 1 files (TypeScript)",
+        "subdirectories": []
+      }
+    ],
+    "entryPointDetails": [],
+    "serviceArchitecture": {
+      "microservices": [
+        "api"
+      ],
+      "monoliths": [],
+      "libraries": []
+    },
+    "layeredArchitecture": {
+      "presentation": [],
+      "business": [],
+      "data": [],
+      "infrastructure": []
+    }
+  },
+  "largeFiles": [],
+  "dependencies": {
+    "production": [
+      "@azure/msal-node",
+      "peerjs",
+      "qrcode-generator"
+    ],
+    "development": [
+      "@playwright/test",
+      "@sveltejs/adapter-static",
+      "@sveltejs/kit",
+      "@sveltejs/vite-plugin-svelte",
+      "@types/node",
+      "lucide",
+      "prettier",
+      "svelte",
+      "svelte-check",
+      "typescript",
+      "vite"
+    ],
+    "total": 14
+  },
+  "complexity": {
+    "averageFileSize": 70.36637390213299,
+    "maxFileSize": 0,
+    "nestedDepth": 0,
+    "estimatedComplexity": "high"
+  },
+  "gitRepo": {
+    "firstCommitDate": "2026-11-12",
+    "totalCommits": 210,
+    "numContributors": 0,
+    "currentBranch": "dev",
+    "remoteUrls": [
+      "https://github.com/Sprenk-bot/Happy-Hallways-Hub.git",
+      "https://github.com/teacherdotdev/happy-hallways.git"
+    ]
+  },
+  "license": "MIT"
+}

@@ -23,13 +23,16 @@
     "format": "prettier --write .",
     "test": "playwright test",
     "hub:host": "bun hub-host/run.ts",
-    "test:hub-host": "bun test hub-host/server.test.ts",
+    "hub:preflight": "bun hub-host/preflight.ts",
+    "hub:invite:tic": "bun hub-host/issue-first-tic-invitation.ts",
+    "test:hub-host": "bun test hub-host/backup-crypto.test.ts hub-host/backups.test.ts hub-host/preflight.test.ts hub-host/server.test.ts",
     "icons": "node scripts/generate-icons.mjs",
     "demo": "bun scripts/make-demo.ts",
     "guides:screenshots": "playwright test -c playwright.guides.config.ts"
   },
   "type": "module",
   "dependencies": {
+    "@azure/msal-node": "^7.2.1",
     "peerjs": "^1.5.5",
     "qrcode-generator": "^2.0.4"
   },

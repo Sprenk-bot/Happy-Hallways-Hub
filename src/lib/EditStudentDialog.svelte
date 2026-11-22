@@ -1,6 +1,6 @@
 <script lang="ts">
   import Modal from './Modal.svelte';
-  import { account, classStudents, renameStudent, setAlwaysGo, setExempt, setStudentPin } from './account.svelte';
+  import { account, classStudents, renameStudent, setAlwaysGo, setExempt, setStudentCategory, setStudentPin } from './account.svelte';
   import { pinProblem } from './pins';
   import { displayName, maxPrefix } from './roster';
   import type { Student } from './types';
@@ -32,6 +32,8 @@
   let alwaysGo = $state(!!student.alwaysGo);
   // svelte-ignore state_referenced_locally
   let pin = $state(student.pin ?? '');
+  // svelte-ignore state_referenced_locally
+  let categoryId = $state(student.categoryId ?? '');
   let error = $state('');
 
   /** The same rule the import enforces: no two students may look alike at the kiosk, in any of their classes. */
@@ -65,6 +67,9 @@
     }
     if (exempt !== !!student.exempt) setExempt(student.id, exempt);
     if (alwaysGo !== !!student.alwaysGo) setAlwaysGo(student.id, alwaysGo);
+    if (categoryId !== (student.categoryId ?? '')) {
+      setStudentCategory(student.id, categoryId || null);
+    }
     onClose();
   }
 </script>
@@ -77,6 +82,15 @@
       Last name
       <input bind:value={lastName} autocomplete="off" />
       <span class="muted small">Kept only on this computer. The kiosk never shows it.</span>
+    </label>
+    <label class="field">
+      Year group
+      <select aria-label="Student year group" bind:value={categoryId}>
+        <option value="">Unassigned</option>
+        {#each account.studentCategories as category (category.id)}
+          <option value={category.id}>{category.name}</option>
+        {/each}
+      </select>
     </label>
     {#each memberships as { cls } (cls.id)}
       <label class="field">

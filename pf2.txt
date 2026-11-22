@@ -1,0 +1,46 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... stem.Text.Encoding]::UTF8; bun test src/lib/peer.test.ts 2>&1 | Out-F ...
++                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+src\lib\peer.test.ts:
+161 | 
+162 |     // Close cancels any pending reconnect.
+163 |     peer.emit("close");
+164 |     expect(
+165 |       timeouts.some((timer) => timer.id === lastTimer.id && timer.ms === lastTimer.ms),
+166 |     ).toBe(false);
+            ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\src\lib\peer.test.ts:166:7)
+(fail) peer connection helpers (fictional doubles, fake timers) > reconnect backs off exponentially and resets after a 
+successful open [2.24ms]
+185 | 
+186 |     // Silence past the deadline closes the connection and clears the interval.
+187 |     now += keepAliveTimings.silentMs + 1_000;
+188 |     heartbeat.fn();
+189 |     expect(connection.open).toBe(false);
+190 |     expect(intervals.some((timer) => timer.id === heartbeat.id)).toBe(false);
+                                                                       ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\src\lib\peer.test.ts:190:66)
+(fail) peer connection helpers (fictional doubles, fake timers) > keepAlive closes a silent connection and stops its 
+heartbeat [0.60ms]
+
+ 0 pass
+ 2 fail
+ 10 expect() calls
+Ran 2 tests across 1 file. [53.00ms]

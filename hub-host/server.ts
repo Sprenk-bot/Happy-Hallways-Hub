@@ -1,24 +1,65 @@
 import {
-  createServer,
+  createServer as createHttpServer,
   type IncomingMessage,
-  type Server,
+  type Server as HttpServer,
   type ServerResponse,
 } from "node:http";
 import {
-  HubStore,
-  RevisionConflictError,
-  StateIntegrityError,
-  type StateSnapshot,
-} from "./store";
+  createServer as createHttpsServer,
+  type Server as HttpsServer,
+} from "node:https";
+import { HubStore, RevisionConflictError, RolePermissionError, RecordNotFoundError, HubKioskPinError, HubKioskPromptError, InvitationError, StateIntegrityError, type StaffActor } from "./store";
+import { HubBackupManager } from "./backups";
+import { createEntraClient, type EntraOptions } from "./entra";
+import type { IConfidentialClientApplication } from "@azure/msal-node";
+import { existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
+import { serveStatic } from "./static";
+import {
+  isHubConcernPolicyRequest,
+  isHubConcernRequest,
+  isHubPromptOverrideRequest,
+  isFavouriteStudentIds,
+  isRecord,
+  readHubKioskSessionCookie,
+  readJsonRequest,
+  readSessionCookie,
+  requireStaff,
+  routeAuditState,
+  routeBackups,
+  routeInvitations,
+  routeKiosk,
+  routeMail,
+  routePublic,
+  routeSessions,
+  sessionCookie,
+  sessionResponse,
+  stateForStaff,
+  writeJson,
+  type RouteContext,
+} from "./routes";
 
 export type HubHostOptions = {
   databasePath: string;
+  localBackupDirectory?: string;
+  offHostBackupDirectory?: string | null;
+  fallbackBackupDirectory?: string | null;
+  backupEncryptionKey?: Buffer;
+  allowNamedProfileFallback?: boolean;
   host?: string;
   port?: number;
+  allowLan?: boolean;
+  tls?: {
+    certificate: string | Buffer;
+    privateKey: string | Buffer;
+    publicHost: string;
+  };
+  entra?: EntraOptions;
+  staticDirectory?: string | null;
 };
 
 export type RunningHubHost = {
-  server: Server;
+  server: HttpServer | HttpsServer;
   url: string;
   close: () => Promise<void>;
 };
@@ -27,24 +68,121 @@ export async function startHubHost(
   options: HubHostOptions,
 ): Promise<RunningHubHost> {
   const host = options.host ?? "127.0.0.1";
+  const allowNamedProfileFallback = options.allowNamedProfileFallback ?? false;
   const port = options.port ?? 8787;
-  if (host !== "127.0.0.1") {
+  const isLoopback = host === "127.0.0.1" || host === "::1";
+  if (!isLoopback && !options.allowLan) {
     throw new Error(
-      "This development host only binds to 127.0.0.1. LAN binding requires authenticated TLS first.",
+      "LAN binding is disabled. Explicit approval and HTTPS certificate settings are required.",
     );
   }
-  if (!Number.isInteger(port) || port < 0 || port > 65535)
+  if (options.allowLan && (!options.tls || !options.tls.publicHost)) {
+    throw new Error(
+      "LAN mode requires HTTPS certificate, key, and public host settings.",
+    );
+  }
+  if (options.allowLan && isLoopback) {
+    throw new Error("LAN mode requires a non-loopback bind address.");
+  }
+  const publicHost = options.tls?.publicHost ?? host;
+  if (
+    publicHost.includes("/") ||
+    publicHost.includes(":") ||
+    publicHost.trim() !== publicHost ||
+    publicHost.length > 253
+  ) {
+    throw new TypeError(
+      "publicHost must be a DNS name or IP address without a port.",
+    );
+  }
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new TypeError("port must be an integer from 0 to 65535.");
+  }
+  if (options.entra) {
+    if (
+      !options.allowLan ||
+      !options.tls ||
+      !options.entra.mfaPolicyConfirmed ||
+      !options.backupEncryptionKey
+    ) {
+      throw new Error(
+        "Entra sign-in requires ICT-confirmed MFA policy, the HTTPS LAN listener, and an ICT-managed backup encryption key.",
+      );
+    }
+    const callback = new URL(options.entra.redirectUri);
+    const expectedCallback = `https://${publicHost}:${port}/api/v1/auth/entra/callback`;
+    if (
+      callback.toString() !== expectedCallback ||
+      callback.username ||
+      callback.password ||
+      callback.search ||
+      callback.hash
+    ) {
+      throw new Error(
+        "The Entra redirect URI must exactly match the HTTPS Hub Host callback URL.",
+      );
+    }
+  }
 
-  const store = new HubStore(options.databasePath);
+  const entraClient: IConfidentialClientApplication | null = options.entra
+    ? createEntraClient(options.entra)
+    : null;
+  const staticDirectory = options.staticDirectory
+    ? resolve(options.staticDirectory)
+    : null;
+  if (
+    staticDirectory &&
+    (!existsSync(staticDirectory) ||
+      !statSync(staticDirectory).isDirectory() ||
+      !existsSync(resolve(staticDirectory, "index.html")) ||
+      !existsSync(resolve(staticDirectory, "_app")))
+  ) {
+    throw new Error(
+      "The static application directory must contain index.html and _app output from a Happy Hallways build.",
+    );
+  }
+  const localBackupDirectory =
+    options.localBackupDirectory ?? ".hub-data/backups/local";
+  const store = new HubStore(
+    options.databasePath,
+    localBackupDirectory,
+    options.backupEncryptionKey,
+  );
+  const backupManager = new HubBackupManager(
+    store,
+    localBackupDirectory,
+    [
+      { role: "preferred", directory: options.offHostBackupDirectory ?? null },
+      { role: "fallback", directory: options.fallbackBackupDirectory ?? null },
+    ],
+    options.backupEncryptionKey,
+  );
   let activePort = port;
-  const server = createServer((request, response) => {
-    void route(request, response, store, () => activePort).catch(() => {
-      if (!response.headersSent)
-        writeJson(response, 500, { error: "host_error" });
+  const handler = (request: IncomingMessage, response: ServerResponse) => {
+    void route(
+      request,
+      response,
+      store,
+      backupManager,
+      publicHost,
+      options.allowLan ? "https_lan_configured" : "loopback_only",
+      Boolean(options.tls),
+      entraClient,
+      options.entra ?? null,
+      allowNamedProfileFallback,
+      staticDirectory,
+      () => activePort,
+    ).catch((error: unknown) => {
+      if (!response.headersSent) writeError(response, error);
       else response.destroy();
     });
-  });
+  };
+  const server = options.tls
+    ? createHttpsServer(
+      { cert: options.tls.certificate, key: options.tls.privateKey },
+      handler,
+    )
+    : createHttpServer(handler);
 
   try {
     await new Promise<void>((resolveListen, rejectListen) => {
@@ -67,16 +205,18 @@ export async function startHubHost(
     throw new Error("The host did not open a TCP address.");
   }
   activePort = address.port;
+  await backupManager.start();
 
   let closed = false;
   return {
     server,
-    url: `http://${host}:${address.port}`,
+    url: `${options.tls ? "https" : "http"}://${publicHost}:${address.port}`,
     close: () => {
       if (closed) return Promise.resolve();
       closed = true;
       return new Promise((resolveClose, rejectClose) => {
         server.close((error) => {
+          backupManager.stop();
           store.close();
           if (error) rejectClose(error);
           else resolveClose();
@@ -86,129 +226,268 @@ export async function startHubHost(
   };
 }
 
+/** Public health/auth endpoints, then per-resource handlers behind session guards. */
 async function route(
   request: IncomingMessage,
   response: ServerResponse,
   store: HubStore,
+  backupManager: HubBackupManager,
+  expectedHostName: string,
+  networkMode: "loopback_only" | "https_lan_configured",
+  secure: boolean,
+  entraClient: IConfidentialClientApplication | null,
+  entraOptions: EntraOptions | null,
+  allowNamedProfileFallback: boolean,
+  staticDirectory: string | null,
   activePort: () => number,
 ) {
+  if (secure) {
+    response.setHeader("Strict-Transport-Security", "max-age=31536000");
+  }
+  const sessionActor = store.getSession(readSessionCookie(request));
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
-  const expectedHost = `127.0.0.1:${activePort()}`;
-
-  if (request.headers.host !== expectedHost)
+  const expectedHost = `${expectedHostName}:${activePort()}`;
+  if (request.headers.host !== expectedHost) {
     return writeJson(response, 421, { error: "host_mismatch" });
+  }
   const origin = request.headers.origin;
-  if (origin && origin !== `http://${expectedHost}`)
+  if (origin && origin !== `${secure ? "https" : "http"}://${expectedHost}`) {
     return writeJson(response, 403, { error: "origin_not_allowed" });
+  }
 
-  if (url.pathname === "/api/v1/health" && request.method === "GET") {
-    try {
-      const saved = store.read();
-      return writeJson(response, 200, {
-        status: "ready",
-        storage: "sqlite",
-        revision: saved?.revision ?? 0,
-        lastSavedAt: saved?.savedAt ?? null,
+  // The kiosk routes authenticate by cookie, so staff sessions stay optional here.
+  const actor: StaffActor | null = sessionActor;
+  const context: RouteContext = {
+    request,
+    response,
+    store,
+    backupManager,
+    networkMode,
+    secure,
+    entraClient,
+    entraOptions,
+    allowNamedProfileFallback,
+    staticDirectory,
+    actor,
+    kioskToken: readHubKioskSessionCookie(request),
+  };
+
+  // Endpoints reachable without any session.
+  if (await routePublic(context, url)) return;
+
+  // Kiosk routes authenticate with their own cookie, not a staff session.
+  if (url.pathname.startsWith("/api/v1/kiosk/")) {
+    if (await routeKiosk(context, url)) return;
+  }
+
+  // Everything below needs a staff session.
+  if (!actor) {
+    if (
+      url.pathname.startsWith("/api/") &&
+      !url.pathname.startsWith("/api/v1/kiosk/") &&
+      url.pathname !== "/api/turn"
+    ) {
+      return writeJson(response, 401, { error: "staff_session_required" });
+    }
+    if (url.pathname === "/api/turn") {
+      return writeJson(response, 503, { error: "turn_credentials_unavailable" });
+    }
+    if (staticDirectory && serveStatic(request, response, staticDirectory, url.pathname)) {
+      return;
+    }
+    return writeJson(response, 404, { error: "not_found" });
+  }
+
+  if (await routeBackups(context, url)) return;
+  if (routeMail(context, url)) return;
+  if (routeInvitations(context, url)) return;
+  if (routeSessions(context, url)) return;
+  if (await routeAuditState(context, url)) return;
+
+  if (
+    url.pathname === "/api/v1/hub/prompt-overrides" &&
+    request.method === "POST"
+  ) {
+    if (requireStaff(context)) return;
+    const body = await readJsonRequest(request, 2 * 1024);
+    if (!isHubPromptOverrideRequest(body)) {
+      return writeJson(response, 400, {
+        error: "invalid_hub_prompt_override_request",
       });
-    } catch (error) {
-      if (error instanceof StateIntegrityError)
-        return writeJson(response, 503, {
-          status: "degraded",
-          error: "state_integrity_failed",
+    }
+    return writeJson(response, 201, store.createHubPromptOverride(actor, body));
+  }
+
+  if (url.pathname === "/api/v1/session" && request.method === "GET") {
+    if (requireStaff(context)) return;
+    return writeJson(response, 200, sessionResponse(actor));
+  }
+
+  if (url.pathname === "/api/v1/preferences") {
+    if (requireStaff(context)) return;
+    if (request.method === "GET") {
+      return writeJson(response, 200, store.readStaffPreferences(actor));
+    }
+    if (request.method === "PUT") {
+      const body = await readJsonRequest(request);
+      if (
+        !isRecord(body) ||
+        Object.keys(body).length !== 1 ||
+        !isFavouriteStudentIds(body.favouriteStudentIds)
+      ) {
+        return writeJson(response, 400, {
+          error: "invalid_staff_preferences",
         });
-      throw error;
+      }
+      return writeJson(
+        response,
+        200,
+        store.saveStaffPreferences(actor, body.favouriteStudentIds),
+      );
     }
   }
 
+  if (url.pathname === "/api/v1/concerns/settings") {
+    if (requireStaff(context)) return;
+    if (request.method === "GET") {
+      return writeJson(response, 200, store.readHubConcernPolicy());
+    }
+    if (request.method === "PUT") {
+      const body = await readJsonRequest(request);
+      if (!isHubConcernPolicyRequest(body)) {
+        return writeJson(response, 400, {
+          error: "invalid_hub_concern_policy",
+        });
+      }
+      return writeJson(response, 200, store.saveHubConcernPolicy(actor, body));
+    }
+  }
+
+  if (url.pathname === "/api/v1/concerns" && request.method === "POST") {
+    if (requireStaff(context)) return;
+    const body = await readJsonRequest(request);
+    if (!isHubConcernRequest(body)) {
+      return writeJson(response, 400, { error: "invalid_hub_concern_request" });
+    }
+    return writeJson(response, 201, store.createHubConcern(actor, body));
+  }
+
+  if (url.pathname === "/api/v1/sign-out" && request.method === "POST") {
+    if (requireStaff(context)) return;
+    store.revokeSession(actor.sessionId, actor, "staff_session_signed_out");
+    return writeJson(
+      response,
+      200,
+      { signedOut: true },
+      { "Set-Cookie": sessionCookie("", 0, secure) },
+    );
+  }
+
+  if (url.pathname === "/api/v1/profile" && request.method === "PATCH") {
+    if (requireStaff(context)) return;
+    const body = await readJsonRequest(request);
+    if (!isRecord(body) || typeof body.displayName !== "string") {
+      return writeJson(response, 400, { error: "invalid_profile_request" });
+    }
+    return writeJson(
+      response,
+      200,
+      store.renameProfile(actor.staffId, body.displayName, actor),
+    );
+  }
+
   if (url.pathname === "/api/v1/state" && request.method === "GET") {
+    if (requireStaff(context)) return;
     try {
       const saved = store.read();
       return writeJson(
         response,
         200,
-        saved ?? { revision: 0, savedAt: null, checksum: null, snapshot: null },
+        stateForStaff(
+          actor,
+          saved ?? {
+            revision: 0,
+            savedAt: null,
+            checksum: null,
+            snapshot: null,
+          },
+        ),
       );
     } catch (error) {
-      if (error instanceof StateIntegrityError)
+      if (error instanceof StateIntegrityError) {
         return writeJson(response, 503, { error: "state_integrity_failed" });
+      }
       throw error;
     }
   }
 
   if (url.pathname === "/api/v1/state" && request.method === "PUT") {
-    if (
-      !/^application\/json(?:\s*;|$)/i.test(
-        request.headers["content-type"] ?? "",
-      )
-    ) {
-      return writeJson(response, 415, { error: "json_required" });
-    }
-    let body: unknown;
-    try {
-      body = await readJson(request);
-    } catch {
-      return writeJson(response, 400, { error: "invalid_json" });
-    }
-    if (!isSaveRequest(body))
+    if (requireStaff(context)) return;
+    const body = await readJsonRequest(request);
+    if (!isRecord(body)) {
       return writeJson(response, 400, { error: "invalid_state_request" });
-
-    try {
-      const saved = store.save(body.snapshot, body.expectedRevision);
-      return writeJson(response, 200, saved);
-    } catch (error) {
-      if (error instanceof RevisionConflictError) {
-        return writeJson(response, 409, {
-          error: "revision_conflict",
-          currentRevision: error.currentRevision,
-        });
-      }
-      if (error instanceof StateIntegrityError)
-        return writeJson(response, 503, { error: "state_integrity_failed" });
-      if (error instanceof TypeError)
-        return writeJson(response, 400, { error: "invalid_state_request" });
-      throw error;
     }
+    const saved = store.save(
+      body.snapshot as Record<string, unknown>,
+      body.expectedRevision as number,
+      actor,
+      body.baseSnapshot as Record<string, unknown> | undefined,
+    );
+    return writeJson(response, 200, stateForStaff(actor, saved));
   }
 
-  if (url.pathname === "/api/v1/health" || url.pathname === "/api/v1/state") {
-    response.setHeader(
-      "Allow",
-      url.pathname.endsWith("/health") ? "GET" : "GET, PUT",
-    );
-    return writeJson(response, 405, { error: "method_not_allowed" });
+  if (url.pathname === "/api/turn") {
+    return writeJson(response, 503, { error: "turn_credentials_unavailable" });
+  }
+
+  if (url.pathname.startsWith("/api/")) {
+    return writeJson(response, 404, { error: "not_found" });
+  }
+  if (
+    staticDirectory &&
+    serveStatic(request, response, staticDirectory, url.pathname)
+  ) {
+    return;
   }
   return writeJson(response, 404, { error: "not_found" });
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request)
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-}
-
-function isSaveRequest(
-  value: unknown,
-): value is { expectedRevision: number; snapshot: StateSnapshot } {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return false;
-  const request = value as Record<string, unknown>;
-  return (
-    Number.isSafeInteger(request.expectedRevision) &&
-    (request.expectedRevision as number) >= 0 &&
-    isRecord(request.snapshot)
-  );
-}
-
-function isRecord(value: unknown): value is StateSnapshot {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function writeJson(response: ServerResponse, status: number, body: unknown) {
-  response.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
-  });
-  response.end(JSON.stringify(body));
+function writeError(response: ServerResponse, error: unknown) {
+  if (error instanceof RevisionConflictError) {
+    return writeJson(response, 409, {
+      error: "revision_conflict",
+      currentRevision: error.currentRevision,
+      conflictingPaths: error.conflictingPaths,
+    });
+  }
+  if (error instanceof StateIntegrityError) {
+    return writeJson(response, 503, { error: "state_integrity_failed" });
+  }
+  if (error instanceof InvitationError) {
+    return writeJson(response, error.status, { error: error.code });
+  }
+  if (error instanceof RolePermissionError) {
+    return writeJson(response, 403, { error: "role_not_allowed" });
+  }
+  if (error instanceof HubKioskPinError) {
+    return writeJson(response, 403, { error: "invalid_student_pin" });
+  }
+  if (error instanceof HubKioskPromptError) {
+    const status =
+      error.code === "hub_prompt_configuration_changed"
+        ? 409
+        : error.code === "invalid_hub_prompt_response"
+          ? 400
+          : 422;
+    return writeJson(response, status, { error: error.code });
+  }
+  if (error instanceof RecordNotFoundError) {
+    return writeJson(response, 404, { error: "record_not_found" });
+  }
+  if (error instanceof TypeError) {
+    return writeJson(response, 400, {
+      error: error.message || "invalid_request",
+    });
+  }
+  return writeJson(response, 500, { error: "host_error" });
 }

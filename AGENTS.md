@@ -1,121 +1,29 @@
-# EdTech-a-thon Agent Instructions
+# Happy Hallways Hub project instructions
 
-This project is a pototype to be completed during the 3-day "EdTech-a-thon" event by a team with varying technical expertise. To ensure that teams are organizing their code similarly, we have some preferred conventions.
+## Product authority
 
-- All code belongs in a git repo at `~/code` aka `/home/exedev/code`
-- Every project is a sub-directory within `~/code`. Make `~/code` be a `bun` workspace only if the monorepo contains _multiple JS projects_.
+- Before Hub-related work, read `docs/Happy_Hallways_Hub_Edition_Master_Specification.md` and the existing UI reference pack. The specification is the authoritative requirements source. If either is missing, check for the user-supplied copy beside the repository; if still unavailable, ask before making assumptions.
+- Preserve existing Happy Hallways behaviour, screens, navigation, visual identity and reusable components wherever possible. Extend existing features before replacing them. Keep ordinary classroom passes separate from Hub visits and movement events.
+- Update the master specification only when the user explicitly approves a requirements change.
 
-## General Instructions
+## Approved direction and fallbacks
 
-- Write simple code
-- Choose a simple tech stack
-- Don't install dependencies for features that can be implemented in under 400 lines of code
-- Write code that newcomers can understand
-- Write code that is self-documenting
-- If the product requirements are unclear, ask the human instead of guessing
-- You are building a high-fidelity prototype
+- The Hub Host is the authoritative local service and durable data store. Its process must remain available independently of the kiosk browser. Use the user/ICT-approved host device and operating system; if unavailable or unsuitable, present the documented alternatives for approval rather than choosing silently.
+- Prefer school-approved staff SSO with its MFA. If unavailable, offer the TIC-approved named-profile and revocable device-enrolment fallback. Do not describe name entry or device pairing as MFA. Do not use real student data until ICT approves an MFA-capable sign-in or compensating control.
+- Prefer authenticated, encrypted school-LAN connections so local operations can continue without internet. Test the actual network. PeerJS/WebRTC may be an alternative only when approved and its internet/service dependencies are clear. Show disconnected or pending states accurately; never report an action as saved until the Host acknowledges it.
+- Provide automatic local recovery snapshots (15-minute initial target), an ICT-approved school-controlled off-host copy (five-minute lag target), integrity checks, isolated restore tests and staged recovery. Show actual health and lag. If the preferred destination is unavailable, queue replication and show degraded protection; offer only ICT-approved alternatives. Do not auto-delete records or backups before the school records authority approves a retention rule.
+- Do not add paid services, subscriptions, external student-data services, analytics carrying student data or external AI providers without explicit approval.
 
-## Communication Style
+## Development and data safety
 
-When communicating with the user, speak in a style and tone that is appropriate for both developers and educators who are not developers. Explain your reasoning clearly and simply. Use jargon only when it is more helpful than simple language.
+- Work in small, reviewable stages. Before each stage, inspect the relevant source, types, data flow and tests, then tell the user the proposed behaviour, affected files, migration/data risks and acceptance checks. Implement only the approved stage.
+- Preserve student identity and PIN continuity, visit history, original timestamps, staff attribution and audit records. Use versioned, recoverable migrations and back up before high-impact changes.
+- Use fictional student and staff information only. Never include real student data in prompts, fixtures, screenshots or logs.
+- Never perform destructive migrations, delete or overwrite existing data, replace the original repository, deploy or publish without explicit approval. Keep a recoverable baseline and use a separate private working copy for Hub development.
+- Run relevant checks, tests and builds after changes. Do not claim a check passed unless it was run.
+- At each handoff, report changed files, behaviour, checks and results, limitations, risks and outstanding issues. Do not imply ICT approval, authentication, LAN operation or recovery is verified until tested on the intended setup.
 
-## Live Dev Server
+## Repository conventions
 
-You are running on a live dev server. A proxy is in place that routes external traffic to port `8000`.
-
-When you are building an app for a user, you should make sure that it is continuously running in dev mode on port `8000`, even if the user does not ask you to start the server.
-
-Your server might receive traffic from hostnames at _.exe.xyz or _.edtechathon.com. If you are running a vite-powered server, your vite config should include the following:
-
-```
-{
-  server: {
-    allowedHosts: [".exe.xyz", ".edtechathon.com"]
-  }
-}
-```
-
-## Things to Do Regularly
-
-Before/after every change, consider doing the following things if appropriate:
-
-### Commit and push to GitHub
-
-- When a small self-contained chunk of work has been completed, automatically create a commit with a reasonable message
-- When larger chunks of work have been completed (such as new features or major bug fixes), offer to push the code to GitHub for the user. (Be sure to describe this offer in language that is understandable to both experienced and inexperienced developers.)
-
-### Check Types and Linting
-
-- Run any available type checkers and linters periodically to validate code
-
-## Tech Stack Choices
-
-When making choices about the tech stack to use, prefer these choices in priority order:
-
-1. Technology choices specified by the human
-2. Continue using technology that already exists in the project
-3. Technology choices that are most sensible for the constraints or needs of the project
-4. When in doubt or when there is no best option, prefer the choices recommended in the default tech stacks listed below
-5. If a default is not specified, prefer simple, standard technology choices that are easy for newcomers to understand and contribute to
-
-### Default Web App Tech Stack
-
-When the human has not specified a choice and there is no particular benefit to one option over another, default to the following for the sake of cross-team consistency:
-
-- Runtime: Bun
-- Package manager: Bun
-- Language: Typescript
-- Build tool: Vite-based tooling
-- Linter: ESLint (for JS/TS projects)
-- Formatter: Prettier (for JS/TS projects; by default, create a blank prettier config file that does not modify any settings)
-- Framework: SvelteKit if using Svelte or Astro if not
-- UI Library: Svelte
-- UI / Styling: Tailwind CSS
-- UI Rendering Method: Prefer DOM elements over canvas when possible for the sake of accessibility, using canvas only when it is unreasonable not to
-- Database: Prefer localStorage if user accounts or persistence are not strictly necessary, otherwise SQLite
-- ORM: Drizzle (only if needed)
-
-When appropriate, set up scripts in `package.json` for type checking, linting, and formatting code automatically via the CLI.
-
-### When Not to Build a Web App
-
-- If the user requests to build a **browser extension**, explain that this VM is not the best way to do that, and recommend that they ask an EdTech-a-thon Director about alternative templates.
-- If the user requests to build a native desktop or mobile app, explain that this template is for building web apps only, and collaborate with the user to determine the relevant product requirements and decide whether or not a web app is appropriate. Prefer building as a web app if possible. If the product requirements require a native app, recommend that the user ask an EdTech-a-thon Director for assistance.
-
-<!-- edtechathon:branch-workflow -->
-
-## Branching: Always Work on `dev`
-
-- **All of your work happens on the `dev` branch.** This is where the project is
-  already checked out, and it is the only branch you are able to push to.
-- **Never switch to `main`, and never push to `main`.** It is protected, and the
-  push will be rejected. If you need a separate branch for a large experiment,
-  branch off `dev` and push that instead.
-
-## Publishing the User's Work (Going Live)
-
-Saving work and publishing work are two different things, and the difference
-matters to the user:
-
-- **Saving** (a commit and push to `dev`) happens constantly and is what keeps
-  the work safe. The editing link above always shows the very latest saved work.
-- **Publishing** takes a snapshot of the work and puts it on the showcase site.
-  It has to be approved by an EdTech-a-thon Director, so it does not happen
-  automatically.
-
-You do not need to run any special command to request publishing. Every time you
-push to `dev`, a request to publish is opened on GitHub automatically and stays
-up to date with the latest work. A Director reviews and approves it.
-
-So when the user asks to "publish", "go live", "share it", or "make it real":
-
-1. Make sure the work is saved (commit and push to `dev`).
-2. Tell them, in plain language, that the work is saved and a publish request is
-   waiting for a Director — e.g. "Everything's saved, and I've asked the
-   EdTech-a-thon team to publish it. Once they approve, it'll appear on the
-   showcase site."
-3. Don't imply it is already published, and don't give them a timeline you
-   can't promise.
-
-Never explain branches, pull requests, merges, or GitHub review to the user
-unless they ask, or have shown you that they're a developer.
+- Continue with the existing SvelteKit, Svelte, TypeScript and Bun setup unless an approved technical decision justifies a change. Prefer simple, maintainable code and avoid dependencies for small features that fit the existing stack.
+- Do not push or publish this private project unless the user explicitly approves it and the destination and automation have been checked.

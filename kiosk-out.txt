@@ -1,0 +1,31 @@
+﻿bun test v1.4.4 (38afee6c8)
+bun : 
+At line:1 char:107
++ ... ing]::UTF8; bun test hub-host/server.test.ts -t "runs the Hub kiosk"  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+hub-host\server.test.ts:
+1132 | 
+1133 |     expect(
+1134 |       (
+1135 |         await fetch(`${host.url}/api/v1/kiosk/start`, { method: "POST" })
+1136 |       ).status,
+1137 |     ).toBe(401);
+             ^
+error: expect(received).toBe(expected)
+
+Expected: 401
+Received: 404
+
+      at <anonymous> (C:\Users\kcspr\Downloads\Documentation 
+Happy-Hallways-Hub\Happy-Hallways-Hub\hub-host\server.test.ts:1137:7)
+(fail) local Hub Host staff fallback and state service > runs the Hub kiosk through a one-use activation without 
+exposing staff access [239.67ms]
+
+ 0 pass
+ 28 filtered out
+ 1 fail
+ 1 expect() calls
+Ran 1 test across 1 file. [390.00ms]
