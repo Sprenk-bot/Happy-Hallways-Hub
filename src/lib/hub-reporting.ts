@@ -135,7 +135,7 @@ export function hubMovementRowsToCsv(rows: HubMovementRow[]) {
       row.className,
       row.periodName,
       row.staff,
-      row.concern ? 'Yes' : 'No',
+      row.concern ? 'Yes' : '',
       row.detail,
     ]);
   return [headings, ...lines].map((line) => line.map(csvCell).join(',')).join('\n');

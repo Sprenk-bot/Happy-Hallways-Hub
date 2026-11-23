@@ -48,4 +48,14 @@ describe('Hub movement reporting', () => {
     expect(csv).toContain('Yes');
     expect(csv).not.toContain('private concern note');
   });
+
+  test('leaves the concern field blank when no concern was recorded', () => {
+    const visit: HubVisit = {
+      id: 'visit-3', studentId: 'student-3', studentName: 'Jordan Example',
+      destinationLabel: 'Quiet Room', source: 'direct-kiosk-arrival',
+      arrivedAtHubAt: '2026-11-23T03:00:00.000Z', temporaryTrips: [],
+    };
+    const csv = hubMovementRowsToCsv(hubMovementRows([visit]));
+    expect(csv.split('\n')[1].split(',')[8]).toBe('');
+  });
 });
