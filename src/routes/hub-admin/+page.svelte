@@ -88,6 +88,7 @@
   let session = $state<StaffSession | null>(null);
   let entraEnabled = $state(false);
   let fallbackEnabled = $state(false);
+  let fallbackRealDataApproved = $state(false);
   let restorePoints = $state<RestorePoint[]>([]);
   let staffProfiles = $state<{ id: string; displayName: string; authMethod: string; role: 'ea' | 'tic' | null }[]>([]);
   let concernPolicy = $state<ConcernPolicy>({
@@ -233,8 +234,8 @@
 
   function errorText(code: string | undefined, status: number) {
     const messages: Record<string, string> = {
-      entra_sign_in_not_configured: 'Microsoft Entra sign-in is not configured yet. The named-profile fallback remains limited to fictional development data.',
-      fallback_sign_in_not_configured: 'The named-profile fallback is disabled in Host configuration. Ask ICT to approve and enable it for fictional development use.',
+      entra_sign_in_not_configured: 'Microsoft Entra sign-in is not configured yet. Use the named-profile fallback approved for this Host.',
+      fallback_sign_in_not_configured: 'The named-profile fallback is disabled in Host configuration. Ask the Host administrator to enable it.',
       invitation_unavailable: 'That invitation has expired, was used already, or does not match this staff account.',
       invalid_invitation: 'Check the invitation token and try again.',
       staff_session_required: 'Sign in with an authorised staff account to continue.',
@@ -249,9 +250,10 @@
 
   async function refreshHealth() {
     health = await requestJson<Health>('/api/v1/health');
-    const options = await requestJson<{ preferred: { enabled: boolean }; fallback: { enabled: boolean } }>('/api/v1/auth/options');
+    const options = await requestJson<{ preferred: { enabled: boolean }; fallback: { enabled: boolean; realStudentDataAllowed: boolean } }>('/api/v1/auth/options');
     entraEnabled = options.preferred.enabled;
     fallbackEnabled = options.fallback.enabled;
+    fallbackRealDataApproved = options.fallback.realStudentDataAllowed;
   }
 
   async function refreshTicData() {
@@ -673,24 +675,24 @@
         </div>
       {:else}
         <p class="notice-text">Microsoft Entra is not ready. ICT needs to approve the app registration, MFA policy, and Host certificate settings.</p>
-        {#if !fallbackEnabled}<p class="status-warn">The named-profile fallback is also disabled until it is explicitly enabled in Host configuration.</p>{/if}
+        {#if !fallbackEnabled}<p class="status-warn">The named-profile fallback is disabled in Host configuration.</p>{/if}
       {/if}
 
       {#if fallbackEnabled}
         <details class="fallback">
-          <summary>Development fallback</summary>
-          <p class="status-warn">This named-profile invitation does not verify staff identity or provide MFA. Use fictional data only.</p>
+          <summary>Named-profile sign-in</summary>
+          <p class="status-warn">{fallbackRealDataApproved ? 'ICT has approved this named-profile sign-in as a compensating control for real data on this Host. It does not verify staff identity and is not MFA.' : 'This sign-in is enabled for fictional development only. It does not verify staff identity and is not MFA.'}</p>
           <label for="fallback-token">One-time TIC invitation</label>
           <input id="fallback-token" type="password" autocomplete="off" bind:value={invitationToken} />
           <label for="fallback-name">Display name</label>
           <input id="fallback-name" autocomplete="name" bind:value={displayName} />
-          <button class="btn" onclick={enrollFallback} disabled={working || !invitationToken.trim() || !displayName.trim()}>Use development fallback</button>
+          <button class="btn" onclick={enrollFallback} disabled={working || !invitationToken.trim() || !displayName.trim()}>Sign in with named profile</button>
         </details>
       {/if}
     </section>
   {:else}
     <section class="card staff-session" aria-label="Signed-in staff account">
-      <div><p class="eyebrow">Signed in</p><h2>{session.displayName}</h2><p class="muted">{session.role === 'tic' ? 'Teacher-in-Charge' : 'EA staff'} · {session.authMethod === 'microsoft-entra-oidc' ? 'Microsoft Entra' : 'Development fallback'}</p></div>
+      <div><p class="eyebrow">Signed in</p><h2>{session.displayName}</h2><p class="muted">{session.role === 'tic' ? 'Teacher-in-Charge' : 'EA staff'} · {session.authMethod === 'microsoft-entra-oidc' ? 'Microsoft Entra' : 'Named profile'}</p></div>
       <div class="session-actions">{#if hubRuntimeDirty()}<button class="btn" onclick={downloadUnsavedCopy}>Download unsaved changes</button>{/if}<button class="btn" onclick={signOut} disabled={working}>Sign out</button></div>
     </section>
 
@@ -884,26 +886,26 @@
 
       <section class="card" aria-labelledby="invite-heading">
         <p class="eyebrow">Staff access</p><h2 id="invite-heading">Create a staff invitation</h2>
-        <p class="muted small">Entra invitations are linked to the staff member's school email. Fallback invitations are for fictional development only.</p>
+        <p class="muted small">Entra invitations are linked to the staff member's school email. Named-profile invitations use a one-time code and a TIC-assigned role. This sign-in does not verify staff identity or provide MFA.</p>
         <div class="invite-form">
           <label for="invite-role">Role</label>
           <select id="invite-role" bind:value={invitedRole}><option value="ea">EA staff</option><option value="tic">Teacher-in-Charge</option></select>
           <label for="invite-profile">Link existing profile <span class="muted">(optional)</span></label>
           <select id="invite-profile" value={invitedProfileId} onchange={selectExistingProfile}><option value="">Create a new profile</option>{#each staffProfiles.filter((profile) => !profile.authMethod.includes('entra')) as profile (profile.id)}<option value={profile.id}>{profile.displayName} · {profile.role === 'tic' ? 'TIC' : 'EA'} · {profile.authMethod.includes('fallback') ? 'fallback' : 'staff profile'}</option>{/each}</select>
           <label for="invite-method">Sign-in method</label>
-          <select id="invite-method" bind:value={invitationAuthMode}><option value="entra">Microsoft Entra</option>{#if fallbackEnabled}<option value="fallback">Development fallback</option>{/if}</select>
+          <select id="invite-method" bind:value={invitationAuthMode}><option value="entra">Microsoft Entra</option>{#if fallbackEnabled}<option value="fallback">Named profile</option>{/if}</select>
           {#if invitationAuthMode === 'entra'}
             <label for="invite-email">School email for Entra sign-in</label>
             <input id="invite-email" type="email" autocomplete="off" bind:value={invitedEmail} />
           {:else}
             <span class="muted small">No email is stored. This invitation does not provide identity verification or MFA.</span>
           {/if}
-          <button class="btn btn-primary" onclick={issueInvitation} disabled={working || (invitationAuthMode === 'entra' && !invitedEmail.trim())}>Create {invitationAuthMode === 'entra' ? 'Entra' : 'development'} invitation</button>
+          <button class="btn btn-primary" onclick={issueInvitation} disabled={working || (invitationAuthMode === 'entra' && !invitedEmail.trim())}>Create {invitationAuthMode === 'entra' ? 'Entra' : 'named-profile'} invitation</button>
         </div>
         {#if issuedInvitation}
           <div class="invitation-result" role="status">
             <strong>One-time invitation for {issuedInvitation.invitedEmail}</strong>
-            <p>Expires {formatDate(issuedInvitation.expiresAt)}. Share this token only through an ICT-approved channel. Development fallback invitations do not provide MFA.</p>
+            <p>Expires {formatDate(issuedInvitation.expiresAt)}. Share this token only through an ICT-approved channel. Named-profile sign-in does not verify staff identity or provide MFA.</p>
             <code>{issuedInvitation.token}</code>
           </div>
         {/if}

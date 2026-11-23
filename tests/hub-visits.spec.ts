@@ -1400,3 +1400,85 @@ test("staff can issue a reasoned prompt override without sending its reason to t
     reason,
   });
 });
+
+test("Hub Details and Hub History show the saved timeline without replacing pass History", async ({ page }) => {
+  const snapshot = {
+    version: 4,
+    roster: [{ id: "fictional-student", firstName: "Avery", lastName: "Example", categoryId: "year-7" }],
+    studentCategories: [{ id: "year-7", name: "Year 7", color: "blue" }],
+    classes: [{ id: "fictional-class", name: "Support Group", members: [] }],
+    destinations: [],
+    hubVisits: [{
+      id: "fictional-visit",
+      studentId: "fictional-student",
+      studentName: "Avery Example",
+      studentCategory: { id: "year-7", name: "Year 7", color: "blue" },
+      destinationLabel: "Quiet Room",
+      classId: "fictional-class",
+      className: "Support Group",
+      periodName: "Morning check-in",
+      source: "classroom-notification",
+      notifiedBy: { staffId: "fictional-ea", displayName: "EA Example", role: "ea" },
+      leftClassAt: notifiedAt,
+      hasConcern: true,
+      arrivedAtHubAt: arrivedAt,
+      temporaryTrips: [{
+        id: "fictional-trip",
+        destinationLabel: "Library",
+        startedAt: tripStartedAt,
+        startedBy: { type: "student-kiosk" },
+        returnedAt: tripReturnedAt,
+        returnedBy: { type: "student-kiosk" },
+      }],
+      promptResponses: [{
+        promptId: "fictional-prompt",
+        promptVersion: 1,
+        destinationId: "quiet-room",
+        stage: "arrival",
+        question: "How are you feeling?",
+        responseType: "written",
+        required: true,
+        answer: "I feel settled.",
+        answeredAt: "2026-11-12T01:06:00.000Z",
+      }],
+    }],
+  };
+  await page.route("**/*", async (route) => {
+    if (route.request().resourceType() !== "document") return route.continue();
+    const response = await route.fetch();
+    const html = await response.text();
+    await route.fulfill({
+      response,
+      body: html.replace("<head>", '<head><meta name="happy-hallways-hub-host" content="true">'),
+    });
+  });
+  await page.route("**/api/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/v1/session") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        sessionId: "fictional-session", staffId: "fictional-ea", displayName: "EA Example", role: "ea",
+        authMethod: "named-profile-device-enrolment-fallback", identityVerified: false, mfaVerified: false,
+        expiresAt: "2026-11-13T00:00:00.000Z",
+      }) });
+    }
+    if (url.pathname === "/api/v1/state") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ revision: 1, savedAt: notifiedAt, checksum: "fictional-checksum", snapshot }) });
+    }
+    if (url.pathname === "/api/v1/mail") {
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ messages: [], unreadCount: 0 }) });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) });
+  });
+
+  await page.goto("/details");
+  await page.getByRole("button", { name: "Got it" }).click({ timeout: 5_000 }).catch(() => {});
+  await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
+  await expect(page.locator("tbody").getByText("At the Hub")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Hub History" })).toBeVisible();
+  await page.goto("/hub-history");
+  await expect(page.getByRole("heading", { name: "Hub History" })).toBeVisible();
+  await expect(page.getByText("Started temporary trip: Library")).toBeVisible();
+  await expect(page.getByText("How are you feeling?: I feel settled.")).toBeVisible();
+  await page.goto("/history");
+  await expect(page.getByRole("heading", { name: "Every pass, in every class" })).toBeVisible();
+});

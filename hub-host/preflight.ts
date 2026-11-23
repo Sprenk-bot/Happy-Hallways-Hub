@@ -176,6 +176,23 @@ export function inspectHubHostConfiguration(
   );
   if (privateKeyPath) addAclCheck("HTTPS private-key file", resolve(privateKeyPath), add);
 
+  const trustedProxyOrigin = environment.HUB_TRUSTED_PROXY_ORIGIN?.trim();
+  let proxyOriginStatus: "warning" | "blocked" = "warning";
+  let proxyOriginMessage = "No protected remote staff origin is configured. Local Hub operation remains available on the Host and an ICT-approved LAN.";
+  if (trustedProxyOrigin) {
+    try {
+      const parsed = new URL(trustedProxyOrigin);
+      if (parsed.protocol !== "https:" || parsed.origin !== trustedProxyOrigin || parsed.username || parsed.password) {
+        throw new Error("invalid");
+      }
+      proxyOriginMessage = "An HTTPS proxy origin is configured. This check cannot verify the Cloudflare Access policy, tunnel route, or public reachability.";
+    } catch {
+      proxyOriginStatus = "blocked";
+      proxyOriginMessage = "HUB_TRUSTED_PROXY_ORIGIN must be one exact HTTPS origin with no path, query, or credentials.";
+    }
+  }
+  add("Protected remote origin", proxyOriginStatus, proxyOriginMessage);
+
   const configuredEntra = entraVariableNames.filter((name) =>
     Boolean(environment[name]),
   );
@@ -215,12 +232,16 @@ export function inspectHubHostConfiguration(
 
   const fallbackEnabled =
     environment.HUB_NAMED_PROFILE_FALLBACK_ENABLED === "true";
+  const fallbackApprovedForRealData =
+    environment.HUB_NAMED_PROFILE_FALLBACK_APPROVED_FOR_REAL_DATA === "true";
   add(
     "Named-profile fallback",
-    fallbackEnabled ? "warning" : "ready",
+    fallbackEnabled ? (fallbackApprovedForRealData ? "not_verified" : "warning") : "ready",
     fallbackEnabled
-      ? "Enabled for fictional development only. It does not verify staff identity or provide MFA."
-      : "Disabled. It can be explicitly enabled for fictional development if Entra setup is not available.",
+      ? fallbackApprovedForRealData
+        ? "Enabled. ICT approval is recorded as the compensating control for real data. This sign-in does not verify identity or provide MFA; confirm the approved staff enrolment process and device revocation with ICT."
+        : "Enabled for fictional development only. It does not verify staff identity or provide MFA."
+      : "Disabled. Set HUB_NAMED_PROFILE_FALLBACK_ENABLED=true in the Host configuration to enable it.",
   );
 
   add(
@@ -231,7 +252,9 @@ export function inspectHubHostConfiguration(
   add(
     "Real student data",
     "blocked",
-    "Not ready until ICT-approved sign-in, encrypted backups, an approved off-host destination, Windows permissions, and an on-school restore/network test are complete.",
+    fallbackEnabled && fallbackApprovedForRealData
+      ? "ICT-approved named-profile access is configured. Complete the encrypted backup, approved off-host destination, Windows permissions, and on-school restore/network checks before relying on this Host for real records."
+      : "Not ready until an ICT-approved sign-in or compensating control is configured, along with encrypted backups, an approved off-host destination, Windows permissions, and an on-school restore/network test.",
   );
 
   return {

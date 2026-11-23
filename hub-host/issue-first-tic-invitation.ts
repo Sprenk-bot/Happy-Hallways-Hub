@@ -29,7 +29,7 @@ try {
     console.log("The invitation can only be used by this email through the configured Entra sign-in flow.");
   } else {
     console.log(
-      "Development fallback only. This named profile and device enrolment do not verify staff identity or provide MFA. Enable HUB_NAMED_PROFILE_FALLBACK_ENABLED=true to use it. Do not use with real student data.",
+      "Named-profile sign-in does not verify staff identity or provide MFA. Enable HUB_NAMED_PROFILE_FALLBACK_ENABLED=true to use it. Only set HUB_NAMED_PROFILE_FALLBACK_APPROVED_FOR_REAL_DATA=true when ICT has approved this as a compensating control for this Host.",
     );
   }
 } finally {

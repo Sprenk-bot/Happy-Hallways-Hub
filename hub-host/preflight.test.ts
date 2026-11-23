@@ -37,13 +37,21 @@ describe("Hub Host preflight", () => {
     });
     expect(result.checks.find((check) => check.area === "Named-profile fallback")).toMatchObject({
       status: "ready",
-      message: "Disabled. It can be explicitly enabled for fictional development if Entra setup is not available.",
+      message: "Disabled. Set HUB_NAMED_PROFILE_FALLBACK_ENABLED=true in the Host configuration to enable it.",
     });
     expect(result.localDevelopmentReady).toBe(false);
     expect(result.realStudentDataReady).toBe(false);
   });
 
-  test("labels explicitly enabled named-profile access as development-only", () => {
+  test("checks trusted remote origins without claiming that Cloudflare is configured", () => {
+    const valid = inspectHubHostConfiguration({ HUB_TRUSTED_PROXY_ORIGIN: "https://hub.example.test" });
+    expect(valid.checks.find((check) => check.area === "Protected remote origin")?.status).toBe("warning");
+    expect(valid.checks.find((check) => check.area === "Protected remote origin")?.message).toContain("cannot verify the Cloudflare Access policy");
+    const invalid = inspectHubHostConfiguration({ HUB_TRUSTED_PROXY_ORIGIN: "http://hub.example.test/path" });
+    expect(invalid.checks.find((check) => check.area === "Protected remote origin")).toMatchObject({ status: "blocked" });
+  });
+
+  test("labels enabled named-profile access as development-only until approval is configured", () => {
     const result = inspectHubHostConfiguration({
       HUB_NAMED_PROFILE_FALLBACK_ENABLED: "true",
     });
@@ -52,6 +60,20 @@ describe("Hub Host preflight", () => {
       message: "Enabled for fictional development only. It does not verify staff identity or provide MFA.",
     });
     expect(result.localDevelopmentReady).toBe(true);
+    expect(result.realStudentDataReady).toBe(false);
+  });
+
+  test("records the ICT-approved fallback without claiming that technical readiness checks passed", () => {
+    const result = inspectHubHostConfiguration({
+      HUB_NAMED_PROFILE_FALLBACK_ENABLED: "true",
+      HUB_NAMED_PROFILE_FALLBACK_APPROVED_FOR_REAL_DATA: "true",
+    });
+    const fallback = result.checks.find((check) => check.area === "Named-profile fallback");
+    expect(fallback?.status).toBe("not_verified");
+    expect(fallback?.message).toContain("ICT approval is recorded as the compensating control for real data");
+    const realData = result.checks.find((check) => check.area === "Real student data");
+    expect(realData?.status).toBe("blocked");
+    expect(realData?.message).toContain("Complete the encrypted backup");
     expect(result.realStudentDataReady).toBe(false);
   });
 

@@ -1,0 +1,51 @@
+import { describe, expect, test } from 'bun:test';
+import { hubMovementRows, hubMovementRowsToCsv } from './hub-reporting';
+import type { HubVisit } from './types';
+
+describe('Hub movement reporting', () => {
+  test('keeps movement timestamps chronological and includes temporary trip events', () => {
+    const visit: HubVisit = {
+      id: 'visit-1',
+      studentId: 'student-1',
+      studentName: 'Avery Example',
+      destinationLabel: 'Quiet Room',
+      className: 'Support Group',
+      periodName: 'Morning check-in',
+      source: 'classroom-notification',
+      leftClassAt: '2026-11-23T01:00:00.000Z',
+      arrivedAtHubAt: '2026-11-23T01:05:00.000Z',
+      temporaryTrips: [{
+        id: 'trip-1',
+        destinationLabel: 'Library',
+        startedAt: '2026-11-23T01:10:00.000Z',
+        startedBy: { staffId: 'ea-1', displayName: 'EA Example', role: 'ea' },
+        returnedAt: '2026-11-23T01:20:00.000Z',
+        returnedBy: { type: 'student-kiosk' },
+      }],
+    };
+
+    expect(hubMovementRows([visit]).map((row) => row.event)).toEqual([
+      'Left class',
+      'Arrived at Hub',
+      'Started temporary trip: Library',
+      'Returned from temporary trip: Library',
+    ]);
+  });
+
+  test('quotes CSV fields and never exports private concern note text', () => {
+    const visit: HubVisit = {
+      id: 'visit-2',
+      studentId: 'student-2',
+      studentName: 'Riley, Sample',
+      destinationLabel: 'Quiet Room',
+      source: 'direct-kiosk-arrival',
+      hasConcern: true,
+      arrivedAtHubAt: '2026-11-23T02:00:00.000Z',
+      temporaryTrips: [],
+    };
+    const csv = hubMovementRowsToCsv(hubMovementRows([visit]));
+    expect(csv).toContain('"Riley, Sample"');
+    expect(csv).toContain('Yes');
+    expect(csv).not.toContain('private concern note');
+  });
+});

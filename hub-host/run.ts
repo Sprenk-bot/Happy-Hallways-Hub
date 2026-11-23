@@ -8,6 +8,7 @@ import { startHubHost } from "./server";
 
 const host = process.env.HUB_HOST ?? "127.0.0.1";
 const allowLan = process.env.HUB_ALLOW_LAN === "true";
+const trustedProxyOrigin = process.env.HUB_TRUSTED_PROXY_ORIGIN?.trim() || undefined;
 const certificatePath = process.env.HUB_TLS_CERTIFICATE;
 const privateKeyPath = process.env.HUB_TLS_PRIVATE_KEY;
 const publicHost = process.env.HUB_PUBLIC_HOST;
@@ -48,6 +49,8 @@ const backupEncryptionKey = backupEncryptionKeyPath
   : undefined;
 const allowNamedProfileFallback =
   process.env.HUB_NAMED_PROFILE_FALLBACK_ENABLED === "true";
+const namedProfileFallbackApprovedForRealData =
+  process.env.HUB_NAMED_PROFILE_FALLBACK_APPROVED_FOR_REAL_DATA === "true";
 const entraTenantId = process.env.HUB_ENTRA_TENANT_ID;
 const entraClientId = process.env.HUB_ENTRA_CLIENT_ID;
 const entraRedirectUri = process.env.HUB_ENTRA_REDIRECT_URI;
@@ -98,10 +101,13 @@ const service = await startHubHost({
   fallbackBackupDirectory,
   backupEncryptionKey,
   allowNamedProfileFallback,
+  namedProfileFallbackApprovedForRealData,
+  trustedProxyOrigin,
   entra,
   staticDirectory: existsSync(staticDirectory) ? staticDirectory : null,
 });
 console.log(`Happy Hallways Hub Host prototype listening at ${service.url}`);
+if (trustedProxyOrigin) console.log(`Configured trusted proxy origin: ${trustedProxyOrigin} (Cloudflare Access policy must be enabled separately).`);
 console.log(`SQLite state file: ${databasePath}`);
 console.log(
   `Local application: ${existsSync(staticDirectory) ? staticDirectory : "not built; run bun run build to enable"}.`,
@@ -117,7 +123,7 @@ console.log(
   `Local backup encryption: ${backupEncryptionKey ? `enabled (key ${backupEncryptionKeyId(backupEncryptionKey)})` : "not configured; use fictional data only"}.`,
 );
 console.log(
-  `Named-profile fallback: ${allowNamedProfileFallback ? "enabled for fictional development data; it does not verify identity or MFA" : "disabled pending explicit ICT/development configuration"}. LAN listener: ${allowLan ? "HTTPS configuration enabled; ICT network validation still required" : "disabled"}.`,
+  `Named-profile fallback: ${allowNamedProfileFallback ? namedProfileFallbackApprovedForRealData ? "enabled; ICT-approved for real data as a compensating control, but it does not verify identity or provide MFA" : "enabled for fictional development data only; it does not verify identity or provide MFA" : "disabled pending explicit Host configuration"}. LAN listener: ${allowLan ? "HTTPS configuration enabled; ICT network validation still required" : "disabled"}.`,
 );
 console.log(
   `Microsoft Entra sign-in: ${entra ? "configured; ICT MFA policy attestation supplied" : "disabled pending complete ICT configuration"}.`,

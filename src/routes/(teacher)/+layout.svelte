@@ -31,7 +31,7 @@
   onMount(() => (running = true));
   const ready = $derived(running || !builtInAdvance);
   const ticOnlyRoute = $derived(
-    ['/roster', '/destinations', '/schedule', '/pass-options', '/kiosk', '/student-link', '/settings'].some(
+    ['/roster', '/destinations', '/schedule', '/pass-options', '/kiosk', '/student-link', '/settings', '/student-patterns'].some(
       (path) => page.url.pathname === path || page.url.pathname.startsWith(`${path}/`),
     ) || page.url.pathname.startsWith('/classes'),
   );

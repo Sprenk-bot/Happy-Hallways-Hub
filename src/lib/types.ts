@@ -33,6 +33,20 @@ export type StudentCategory = {
   color: DestinationColor;
 };
 
+export type PinCardStyle = {
+  fontSize: number;
+  pinFontSize: number;
+  align: 'left' | 'center' | 'right';
+  color: string;
+  label: string;
+  showPin: boolean;
+};
+
+export type PinCardDesign = {
+  defaults: PinCardStyle;
+  overrides: Record<string, Partial<PinCardStyle>>;
+};
+
 export const hubKioskChimeValues = ['soft', 'warm', 'bright', 'none'] as const;
 export type HubKioskChime = (typeof hubKioskChimeValues)[number];
 
@@ -450,6 +464,7 @@ export type Account = {
   passes: Pass[];
   /** Main Hub Visits and their Temporary Trips; never folded into classroom passes. */
   hubVisits: HubVisit[];
+  pinCardDesign?: PinCardDesign;
   /** Short-lived, staff-authorised exceptions for required Hub prompts. */
   hubPromptOverrides?: HubPromptOverride[];
   /** Whether students may join a Line once its Pass Limit is reached. */

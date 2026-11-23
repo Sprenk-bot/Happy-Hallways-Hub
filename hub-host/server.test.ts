@@ -30,6 +30,7 @@ async function startTestHost(
   offHostBackupDirectory: string | null = null,
   fallbackBackupDirectory: string | null = null,
   staticDirectory: string | null = null,
+  trustedProxyOrigin?: string,
 ) {
   const host = await startHubHost({
     databasePath,
@@ -41,6 +42,7 @@ async function startTestHost(
     offHostBackupDirectory,
     fallbackBackupDirectory,
     staticDirectory,
+    trustedProxyOrigin,
     host: "127.0.0.1",
     port: 0,
   });
@@ -77,6 +79,18 @@ async function issueBootstrapTic(host: RunningHubHost, databasePath: string) {
 }
 
 describe("local Hub Host staff fallback and state service", () => {
+  test("accepts only an explicitly trusted HTTPS proxy origin and marks sessions Secure", async () => {
+    const path = temporaryDatabase();
+    const host = await startTestHost(path, null, null, null, "https://hub.example.test");
+    const allowed = await fetch(`${host.url}/api/v1/health`, { headers: { Origin: "https://hub.example.test" } });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get("strict-transport-security")).toContain("max-age");
+    expect((await fetch(`${host.url}/api/v1/health`, { headers: { Origin: "https://other.example.test" } })).status).toBe(403);
+    const tic = await issueBootstrapTic(host, path);
+    expect(tic.response.headers.get("set-cookie")).toContain("; Secure");
+    await expect(startHubHost({ databasePath: temporaryDatabase(), trustedProxyOrigin: "http://hub.example.test" })).rejects.toThrow("HTTPS origin");
+  });
+
   test("serves the static app and routes safely from the Hub Host origin", async () => {
     const path = temporaryDatabase();
     const staticDirectory = join(
@@ -254,6 +268,30 @@ describe("local Hub Host staff fallback and state service", () => {
     });
     expect(enrollment.status).toBe(503);
     expect(await enrollment.json()).toEqual({ error: "fallback_sign_in_not_configured" });
+  });
+
+  test("reports the TIC-approved named-profile fallback separately from identity verification and MFA", async () => {
+    const path = temporaryDatabase();
+    const host = await startHubHost({
+      databasePath: path,
+      localBackupDirectory: `${path}.backups`,
+      allowNamedProfileFallback: true,
+      namedProfileFallbackApprovedForRealData: true,
+      host: "127.0.0.1",
+      port: 0,
+    });
+    runningHosts.push(host);
+
+    const options = await fetch(`${host.url}/api/v1/auth/options`).then((response) => response.json());
+    expect(options.fallback).toMatchObject({
+      status: "ict_approved_compensating_control",
+      enabled: true,
+      identityVerified: false,
+      mfaVerified: false,
+      realStudentDataAllowed: true,
+    });
+    expect(options.note).toContain("ICT has approved the named-profile fallback");
+    expect(options.note).not.toContain("is MFA");
   });
 
   test("allows one of two concurrent writes based on the same revision", async () => {

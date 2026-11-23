@@ -197,6 +197,7 @@ function blankAccount(): Account {
     destinations: defaultDestinations(newId),
     passes: [],
     hubVisits: [],
+    pinCardDesign: { defaults: { fontSize: 18, pinFontSize: 30, align: 'center', color: '#ffffff', label: 'Your kiosk PIN', showPin: true }, overrides: {} },
     hubPromptOverrides: [],
     hubKioskSoundSettings: {
       muted: false,
@@ -290,6 +291,8 @@ function upgrade(saved: SavedAccount): Account {
   const oldLimit = saved.passLimit ?? saved.classes[0]?.limit ?? 1;
   saved.studentCategories ??= defaultStudentCategories();
   saved.hubVisits ??= [];
+  saved.pinCardDesign ??= { defaults: { fontSize: 18, pinFontSize: 30, align: 'center', color: '#ffffff', label: 'Your kiosk PIN', showPin: true }, overrides: {} };
+  saved.pinCardDesign.overrides ??= {};
   saved.hubPromptOverrides ??= [];
   saved.hubKioskSoundSettings ??= {
     muted: false,
@@ -543,6 +546,11 @@ export function isHubHostEdition() {
 /** The complete local account encoding, with compact attendance for the Host API. */
 export function accountSnapshot(): Account {
   return JSON.parse(storedText(account)) as Account;
+}
+
+export function savePinCardDesign(design: NonNullable<Account['pinCardDesign']>) {
+  account.pinCardDesign = design;
+  save();
 }
 
 /** Replaces the in-memory account from an acknowledged Host snapshot without writing a browser copy. */

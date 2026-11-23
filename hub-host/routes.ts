@@ -27,6 +27,7 @@ export type RouteContext = {
   entraClient: IConfidentialClientApplication | null;
   entraOptions: EntraOptions | null;
   allowNamedProfileFallback: boolean;
+  namedProfileFallbackApprovedForRealData: boolean;
   staticDirectory: string | null;
   actor: StaffActor | null;
   kioskToken: string | null;
@@ -409,6 +410,7 @@ export async function routePublic(
     entraOptions,
     secure,
     allowNamedProfileFallback,
+    namedProfileFallbackApprovedForRealData,
   } = context;
 
   if (url.pathname === "/api/v1/health" && request.method === "GET") {
@@ -486,14 +488,19 @@ export async function routePublic(
       fallback: {
         id: "tic-approved-named-profile-device-enrolment",
         status: allowNamedProfileFallback
-          ? "development_only"
+          ? namedProfileFallbackApprovedForRealData
+            ? "ict_approved_compensating_control"
+            : "development_only"
           : "disabled_pending_configuration",
         enabled: allowNamedProfileFallback,
         identityVerified: false,
         mfaVerified: false,
-        realStudentDataAllowed: false,
+        realStudentDataAllowed:
+          allowNamedProfileFallback && namedProfileFallbackApprovedForRealData,
       },
-      note: "The fallback is not MFA. Entra is enabled only after ICT confirms its tenant policy enforces MFA. ICT must also approve the app registration, certificate storage, and LAN setup before real student data.",
+      note: namedProfileFallbackApprovedForRealData
+        ? "ICT has approved the named-profile fallback as a compensating control for real data at this Host. It does not verify a staff member's identity and is not MFA. Entra remains a separate sign-in option."
+        : "The named-profile fallback is for fictional development data unless ICT has approved it as a compensating control. It does not verify identity or provide MFA.",
     });
     return true;
   }

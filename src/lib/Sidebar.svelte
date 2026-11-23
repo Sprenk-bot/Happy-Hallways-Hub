@@ -69,6 +69,10 @@
     {/if}
 
     <p class="nav-label">More</p>
+    {#if hubRuntime.hosted}
+      <a class="nav-link" class:active={path === '/details'} href="/details"><Icon name="clipboard-list" />Details</a>
+      <a class="nav-link" class:active={path === '/hub-history'} href="/hub-history"><Icon name="history" />Hub History</a>
+    {/if}
     <a class="nav-link" class:active={path === '/history'} href="/history"><Icon name="history" />History</a>
     <a class="nav-link" class:active={path === '/mail'} href="/mail">
       <Icon name="mail" />Mail Centre

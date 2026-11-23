@@ -46,6 +46,9 @@ export type HubHostOptions = {
   fallbackBackupDirectory?: string | null;
   backupEncryptionKey?: Buffer;
   allowNamedProfileFallback?: boolean;
+  namedProfileFallbackApprovedForRealData?: boolean;
+  /** Exact HTTPS browser origin for an Access-protected tunnel terminating at this Host. */
+  trustedProxyOrigin?: string;
   host?: string;
   port?: number;
   allowLan?: boolean;
@@ -69,8 +72,22 @@ export async function startHubHost(
 ): Promise<RunningHubHost> {
   const host = options.host ?? "127.0.0.1";
   const allowNamedProfileFallback = options.allowNamedProfileFallback ?? false;
+  const namedProfileFallbackApprovedForRealData =
+    options.namedProfileFallbackApprovedForRealData ?? false;
   const port = options.port ?? 8787;
   const isLoopback = host === "127.0.0.1" || host === "::1";
+  const trustedProxyOrigin = options.trustedProxyOrigin;
+  if (trustedProxyOrigin) {
+    let parsed: URL;
+    try { parsed = new URL(trustedProxyOrigin); }
+    catch { throw new TypeError("trustedProxyOrigin must be a valid HTTPS origin."); }
+    if (parsed.protocol !== "https:" || parsed.origin !== trustedProxyOrigin || parsed.username || parsed.password) {
+      throw new TypeError("trustedProxyOrigin must be one exact HTTPS origin without a path.");
+    }
+    if (!isLoopback && !options.allowLan) {
+      throw new Error("A trusted proxy origin requires a loopback listener or explicitly configured HTTPS LAN mode.");
+    }
+  }
   if (!isLoopback && !options.allowLan) {
     throw new Error(
       "LAN binding is disabled. Explicit approval and HTTPS certificate settings are required.",
@@ -166,10 +183,12 @@ export async function startHubHost(
       backupManager,
       publicHost,
       options.allowLan ? "https_lan_configured" : "loopback_only",
-      Boolean(options.tls),
+      Boolean(options.tls || trustedProxyOrigin),
       entraClient,
       options.entra ?? null,
       allowNamedProfileFallback,
+      namedProfileFallbackApprovedForRealData,
+      trustedProxyOrigin,
       staticDirectory,
       () => activePort,
     ).catch((error: unknown) => {
@@ -238,6 +257,8 @@ async function route(
   entraClient: IConfidentialClientApplication | null,
   entraOptions: EntraOptions | null,
   allowNamedProfileFallback: boolean,
+  namedProfileFallbackApprovedForRealData: boolean,
+  trustedProxyOrigin: string | undefined,
   staticDirectory: string | null,
   activePort: () => number,
 ) {
@@ -251,7 +272,8 @@ async function route(
     return writeJson(response, 421, { error: "host_mismatch" });
   }
   const origin = request.headers.origin;
-  if (origin && origin !== `${secure ? "https" : "http"}://${expectedHost}`) {
+  const localOrigin = `${secure ? "https" : "http"}://${expectedHost}`;
+  if (origin && origin !== localOrigin && origin !== trustedProxyOrigin) {
     return writeJson(response, 403, { error: "origin_not_allowed" });
   }
 
@@ -267,6 +289,7 @@ async function route(
     entraClient,
     entraOptions,
     allowNamedProfileFallback,
+    namedProfileFallbackApprovedForRealData,
     staticDirectory,
     actor,
     kioskToken: readHubKioskSessionCookie(request),
