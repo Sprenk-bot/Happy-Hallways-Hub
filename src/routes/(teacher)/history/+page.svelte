@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { account, classStudents, findClass } from '#lib/account.svelte.ts';
+  import { account, classStudents, findClass, staffStudentName } from '#lib/account.svelte.ts';
   import CorrectionDialog from '#lib/CorrectionDialog.svelte';
   import { download, historyToCsv } from '#lib/csv.ts';
   import { attendanceToCsv, markText } from '#lib/attendance.ts';
@@ -131,7 +131,7 @@
   }
 
   function exportCsv() {
-    download(`Happy Hallways history ${dayKey(new Date())}.csv`, historyToCsv(rows, className), 'text/csv');
+    download(`Happy Hallways history ${dayKey(new Date())}.csv`, historyToCsv(rows, className, staffStudentName), 'text/csv');
   }
 </script>
 
@@ -236,7 +236,7 @@
                 {@const pass = row.pass}
                 {@const end = ending(pass)}
                 <td>
-                  <strong>{pass.studentName}</strong>
+                  <strong>{staffStudentName(pass.studentId, pass.studentName)}</strong>
                   {#if pass.note}<span class="pass-note muted small">{pass.note}</span>{/if}
                 </td>
                 <td>{className(pass.classId)}</td>
@@ -262,7 +262,7 @@
                   </button>
                 </td>
               {:else}
-                <td><strong>{row.request.studentName}</strong></td>
+                <td><strong>{staffStudentName(row.request.studentId, row.request.studentName)}</strong></td>
                 <td>{className(row.classId)}</td>
                 <td><span class="destination-chip"><DestinationIcon label={row.destination} size={22} />{row.destination}</span></td>
                 <td class="num muted">–</td>

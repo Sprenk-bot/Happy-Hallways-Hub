@@ -48,6 +48,14 @@
   // svelte-ignore state_referenced_locally
   let hubArrivalChime = $state<HubKioskChime>(destination?.hubArrivalChime ?? 'soft');
   // svelte-ignore state_referenced_locally
+  let hubTimerMinutes = $state<number | null>(destination?.hubTimerMinutes ?? null);
+  // svelte-ignore state_referenced_locally
+  let hubTimerWarningMinutes = $state<number | null>(destination?.hubTimerWarningMinutes ?? 2);
+  // svelte-ignore state_referenced_locally
+  let hubTimerStartsAfterArrivalPrompts = $state(destination?.hubTimerStartsAfterArrivalPrompts === true);
+  // svelte-ignore state_referenced_locally
+  let hubOverdueCountsUp = $state(destination?.hubOverdueCountsUp === true);
+  // svelte-ignore state_referenced_locally
   let arrivalPrompts = $state<HubVisitPrompt[]>(destination?.hubArrivalPrompts?.map((prompt) => ({ ...prompt })) ?? []);
   // svelte-ignore state_referenced_locally
   let departurePrompts = $state<HubVisitPrompt[]>(destination?.hubDeparturePrompts?.map((prompt) => ({ ...prompt })) ?? []);
@@ -185,6 +193,11 @@
       error = 'The Hub kiosk confirmation must be 160 characters or fewer.';
       return;
     }
+    const timerMinutes = typeof hubTimerMinutes === 'number' && !Number.isNaN(hubTimerMinutes) ? Math.round(hubTimerMinutes) : null;
+    if (timerMinutes !== null && (timerMinutes < 1 || timerMinutes > 240)) {
+      error = 'The Hub timer must be between 1 and 240 minutes, or left empty for no timer.';
+      return;
+    }
     for (const prompt of [...arrivalPrompts, ...departurePrompts]) {
       if (!prompt.question.trim() || prompt.question.trim().length > 240) {
         error = 'Each Hub prompt needs a question of 1–240 characters.';
@@ -256,6 +269,11 @@
     else delete saved.kioskConfirmation;
     if (hubArrivalChime !== 'soft') saved.hubArrivalChime = hubArrivalChime;
     else delete saved.hubArrivalChime;
+    if (timerMinutes !== null) saved.hubTimerMinutes = timerMinutes;
+    const warningMinutes = typeof hubTimerWarningMinutes === 'number' && !Number.isNaN(hubTimerWarningMinutes) ? Math.round(hubTimerWarningMinutes) : null;
+    if (timerMinutes !== null && warningMinutes !== null) saved.hubTimerWarningMinutes = Math.min(timerMinutes, Math.max(0, warningMinutes));
+    if (timerMinutes !== null && hubTimerStartsAfterArrivalPrompts) saved.hubTimerStartsAfterArrivalPrompts = true;
+    if (timerMinutes !== null && hubOverdueCountsUp) saved.hubOverdueCountsUp = true;
     saveDestination(saved);
     onClose();
   }
@@ -300,6 +318,19 @@
             {/each}
           </div>
         </div>
+        <fieldset class="hub-timer-settings">
+          <legend>Hub visit timer</legend>
+          <label class="field">Expected minutes at the Hub (optional)
+            <input type="number" min="1" max="240" bind:value={hubTimerMinutes} placeholder="No timer" style="max-width:160px" />
+          </label>
+          {#if hubTimerMinutes}
+            <label class="field">Warning chime minutes before time is up
+              <input type="number" min="0" max="240" bind:value={hubTimerWarningMinutes} style="max-width:160px" />
+            </label>
+            <label class="check"><input type="checkbox" bind:checked={hubTimerStartsAfterArrivalPrompts} /><span>Start after arrival questions are answered</span></label>
+            <label class="check"><input type="checkbox" bind:checked={hubOverdueCountsUp} /><span>When overdue, count upward (otherwise show a negative countdown)</span></label>
+          {/if}
+        </fieldset>
         <div class="field icon-field">
           <span>Icon</span>
           <input type="search" placeholder="Search icons, e.g. water, book, bus" bind:value={iconSearch} aria-label="Search icons" />

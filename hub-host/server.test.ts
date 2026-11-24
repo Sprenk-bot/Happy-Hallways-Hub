@@ -1232,6 +1232,10 @@ describe("local Hub Host staff fallback and state service", () => {
           private: true,
           kioskAvailable: true,
           hubArrivalChime: "bright",
+          hubTimerMinutes: 15,
+          hubTimerWarningMinutes: 2,
+          hubTimerStartsAfterArrivalPrompts: true,
+          hubOverdueCountsUp: true,
           hubPromptVersion: 1,
           hubArrivalPrompts: [
             {
@@ -1485,34 +1489,7 @@ describe("local Hub Host staff fallback and state service", () => {
     expect(await wrongPin.json()).toMatchObject({
       error: "invalid_student_pin",
     });
-    const missingArrivalAnswer = await arrive("4567", {
-      promptVersion: 1,
-      promptAnswers: {},
-    });
-    expect(missingArrivalAnswer.status).toBe(422);
-    expect(await missingArrivalAnswer.json()).toMatchObject({
-      error: "required_hub_prompt_missing",
-    });
-    const staleArrivalAnswer = await arrive("4567", {
-      promptVersion: 2,
-      promptAnswers: { "fictional-arrival-rating": 4 },
-    });
-    expect(staleArrivalAnswer.status).toBe(409);
-    expect(await staleArrivalAnswer.json()).toMatchObject({
-      error: "hub_prompt_configuration_changed",
-    });
-    const invalidRating = await arrive("4567", {
-      promptVersion: 1,
-      promptAnswers: { "fictional-arrival-rating": 8 },
-    });
-    expect(invalidRating.status).toBe(400);
-    expect(await invalidRating.json()).toMatchObject({
-      error: "invalid_hub_prompt_response",
-    });
-    const arrived = await arrive("4567", {
-      promptVersion: 1,
-      promptAnswers: { "fictional-arrival-rating": 4 },
-    });
+    const arrived = await arrive("4567");
     expect(arrived.status).toBe(200);
     expect(await arrived.json()).toMatchObject({
       accepted: true,
@@ -1521,10 +1498,33 @@ describe("local Hub Host staff fallback and state service", () => {
       confirmationMessage:
         "Your arrival at Private destination was saved by the Hub Host.",
     });
+    const movementSavedFirst = await fetch(`${host.url}/api/v1/state`, {
+      headers: { Cookie: ticCookie },
+    }).then((response) => response.json());
+    expect(movementSavedFirst.snapshot.hubVisits[0].arrivedAtHubAt).toBeTruthy();
+    expect(movementSavedFirst.snapshot.hubVisits[0].promptResponses).toBeUndefined();
+    expect(movementSavedFirst.snapshot.hubVisits[0].timerStartedAt).toBeUndefined();
+    const missingArrivalAnswer = await fetch(`${host.url}/api/v1/kiosk/movements`, {
+      method: "POST", headers: { ...kioskRequest, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "prompts", stage: "arrival", visitId: "fictional-kiosk-visit", pin: "4567", promptVersion: 1, promptAnswers: {} }),
+    });
+    expect(missingArrivalAnswer.status).toBe(422);
+    const invalidRating = await fetch(`${host.url}/api/v1/kiosk/movements`, {
+      method: "POST", headers: { ...kioskRequest, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "prompts", stage: "arrival", visitId: "fictional-kiosk-visit", pin: "4567", promptVersion: 1, promptAnswers: { "fictional-arrival-rating": 8 } }),
+    });
+    expect(invalidRating.status).toBe(400);
+    const answeredArrival = await fetch(`${host.url}/api/v1/kiosk/movements`, {
+      method: "POST", headers: { ...kioskRequest, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "prompts", stage: "arrival", visitId: "fictional-kiosk-visit", pin: "4567", promptVersion: 1, promptAnswers: { "fictional-arrival-rating": 4 } }),
+    });
+    expect(answeredArrival.status).toBe(200);
     const stateAtHub = await fetch(`${host.url}/api/v1/state`, {
       headers: { Cookie: ticCookie },
     }).then((response) => response.json());
     const arrivedVisit = stateAtHub.snapshot.hubVisits[0];
+    expect(arrivedVisit).toMatchObject({ hubTimerMinutes: 15, hubTimerWarningMinutes: 2, hubOverdueCountsUp: true });
+    expect(arrivedVisit.timerStartedAt).toBeTruthy();
     expect(arrivedVisit.arrivedBy).toEqual({ type: "student-kiosk" });
     expect(arrivedVisit.promptResponses).toEqual([
       {
@@ -1568,15 +1568,26 @@ describe("local Hub Host staff fallback and state service", () => {
     expect(afterPromptEdit.snapshot.destinations[0].hubArrivalPrompts[0]).toMatchObject({
       question: "How are you feeling now?",
     });
+    const timerExtension = await fetch(`${host.url}/api/v1/hub-visits/${arrivedVisit.id}/time`, {
+      method: "POST", headers: { Cookie: ticCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ minutes: 5 }),
+    });
+    expect(timerExtension.status).toBe(200);
+    expect((await timerExtension.json()).snapshot.hubVisits[0].hubExtraMinutes).toBe(5);
+    const savedHubNote = await fetch(`${host.url}/api/v1/hub-visits/${arrivedVisit.id}/note`, {
+      method: "POST", headers: { Cookie: ticCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ note: "Fictional check-in note." }),
+    });
+    expect(savedHubNote.status).toBe(200);
+    expect((await savedHubNote.json()).snapshot.hubVisits[0].hubStaffNote).toBe("Fictional check-in note.");
     expect(Date.parse(arrivedVisit.arrivedAtHubAt)).toBeGreaterThanOrEqual(
       Date.parse(leftClassAt),
     );
+    const kioskStateAfterStaffChangesResponse = await fetch(`${host.url}/api/v1/kiosk/state`, { headers: kioskRequest });
+    const kioskStateAfterStaffChanges = await kioskStateAfterStaffChangesResponse.json();
+    if (kioskStateAfterStaffChangesResponse.status !== 200) throw new Error(JSON.stringify(kioskStateAfterStaffChanges));
     expect(
-      (
-        await fetch(`${host.url}/api/v1/kiosk/state`, {
-          headers: kioskRequest,
-        }).then((response) => response.json())
-      ).students.find(
+      kioskStateAfterStaffChanges.students.find(
         (student: { id: string }) =>
           student.id === "fictional-kiosk-student",
       ),
@@ -1657,7 +1668,7 @@ describe("local Hub Host staff fallback and state service", () => {
       Date.parse(returnedTrip.startedAt),
     );
 
-    const missingDepartureAnswer = await fetch(
+    const left = await fetch(
       `${host.url}/api/v1/kiosk/movements`,
       {
         method: "POST",
@@ -1669,11 +1680,19 @@ describe("local Hub Host staff fallback and state service", () => {
           visitId: "fictional-kiosk-visit",
           action: "leave",
           pin: "4567",
-          promptVersion: 2,
-          promptAnswers: {},
         }),
       },
     );
+    expect(left.status).toBe(200);
+    const leftBeforeAnswers = await fetch(`${host.url}/api/v1/state`, {
+      headers: { Cookie: ticCookie },
+    }).then((response) => response.json());
+    expect(leftBeforeAnswers.snapshot.hubVisits[0].leftHubAt).toBeTruthy();
+    expect(leftBeforeAnswers.snapshot.hubVisits[0].promptResponses).toHaveLength(1);
+    const missingDepartureAnswer = await fetch(`${host.url}/api/v1/kiosk/movements`, {
+      method: "POST", headers: { ...kioskRequest, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "prompts", stage: "departure", visitId: "fictional-kiosk-visit", pin: "4567", promptVersion: 2, promptAnswers: {} }),
+    });
     expect(missingDepartureAnswer.status).toBe(422);
     const staleDepartureAnswer = await fetch(
       `${host.url}/api/v1/kiosk/movements`,
@@ -1685,7 +1704,8 @@ describe("local Hub Host staff fallback and state service", () => {
         },
         body: JSON.stringify({
           visitId: "fictional-kiosk-visit",
-          action: "leave",
+          action: "prompts",
+          stage: "departure",
           pin: "4567",
           promptVersion: 1,
           promptAnswers: {
@@ -1695,7 +1715,7 @@ describe("local Hub Host staff fallback and state service", () => {
       },
     );
     expect(staleDepartureAnswer.status).toBe(409);
-    const left = await fetch(`${host.url}/api/v1/kiosk/movements`, {
+    const answeredDeparture = await fetch(`${host.url}/api/v1/kiosk/movements`, {
       method: "POST",
       headers: {
         ...kioskRequest,
@@ -1703,7 +1723,8 @@ describe("local Hub Host staff fallback and state service", () => {
       },
       body: JSON.stringify({
         visitId: "fictional-kiosk-visit",
-        action: "leave",
+        action: "prompts",
+        stage: "departure",
         pin: "4567",
         promptVersion: 2,
         promptAnswers: {
@@ -1711,10 +1732,10 @@ describe("local Hub Host staff fallback and state service", () => {
         },
       }),
     });
-    expect(left.status).toBe(200);
-    expect(await left.json()).toMatchObject({
+    expect(answeredDeparture.status).toBe(200);
+    expect(await answeredDeparture.json()).toMatchObject({
       accepted: true,
-      chime: "warm",
+      chime: "none",
     });
     const afterLeave = await fetch(`${host.url}/api/v1/state`, {
       headers: { Cookie: ticCookie },
@@ -1861,7 +1882,18 @@ describe("local Hub Host staff fallback and state service", () => {
     });
     expect(directVisit.leftClassAt).toBeUndefined();
     expect(directVisit.promptResponses).toBeUndefined();
-    expect(directVisit.promptOverrides).toMatchObject([
+    const skippedDirectArrivalPrompts = await fetch(`${host.url}/api/v1/kiosk/movements`, {
+      method: "POST", headers: { ...kioskRequest, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "prompts", stage: "arrival", visitId: directVisit.id, pin: "7890", promptVersion: 1, promptAnswers: {} }),
+    });
+    expect(skippedDirectArrivalPrompts.status).toBe(200);
+    const afterSkippedDirectArrival = await fetch(`${host.url}/api/v1/state`, {
+      headers: { Cookie: ticCookie },
+    }).then((response) => response.json());
+    const skippedVisit = afterSkippedDirectArrival.snapshot.hubVisits.find(
+      (visit: { studentId: string }) => visit.studentId === "fictional-direct-student",
+    );
+    expect(skippedVisit.promptOverrides).toMatchObject([
       {
         destinationId: "fictional-temporary-destination",
         stage: "arrival",
@@ -2417,6 +2449,31 @@ describe("local Hub Host staff fallback and state service", () => {
       }).then((response) => response.json()),
     ).toMatchObject({ unreadCount: 0 });
 
+    const reply = await fetch(`${host.url}/api/v1/mail/${messageId}/replies`, {
+      method: "POST", headers: { Cookie: recipientCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ note: "Fictional reply for the same message chain." }),
+    });
+    expect(reply.status).toBe(201);
+    const senderThread = await fetch(`${host.url}/api/v1/mail`, { headers: { Cookie: senderCookie } }).then((response) => response.json());
+    expect(senderThread.messages[0].replies).toMatchObject([{ senderDisplayName: "EA Recipient", note: "Fictional reply for the same message chain." }]);
+    const forbiddenReply = await fetch(`${host.url}/api/v1/mail/${messageId}/replies`, {
+      method: "POST", headers: { Cookie: otherCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ note: "Unauthorised reply." }),
+    });
+    expect(forbiddenReply.status).toBe(403);
+
+    const archived = await fetch(`${host.url}/api/v1/mail/${messageId}/archive`, {
+      method: "POST", headers: { Cookie: ticCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: true }),
+    });
+    expect(archived.status).toBe(200);
+    expect((await fetch(`${host.url}/api/v1/mail`, { headers: { Cookie: otherCookie } }).then((response) => response.json())).messages).toHaveLength(0);
+    expect((await fetch(`${host.url}/api/v1/mail`, { headers: { Cookie: ticCookie } }).then((response) => response.json())).messages[0].archivedAt).toBeTruthy();
+    await fetch(`${host.url}/api/v1/mail/${messageId}/archive`, {
+      method: "POST", headers: { Cookie: ticCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: false }),
+    });
+
     const retry = await fetch(`${host.url}/api/v1/concerns`, {
       method: "POST",
       headers: { Cookie: senderCookie, "Content-Type": "application/json" },
@@ -2806,7 +2863,7 @@ describe("local Hub Host staff fallback and state service", () => {
     );
     expect(manifest).toMatchObject({
       application: "happy-hallways-hub",
-      schemaVersion: 7,
+      schemaVersion: 9,
       revision: 1,
       recordCounts: { roster: 1, visits: 2 },
       dataRange: {
@@ -3192,7 +3249,7 @@ describe("local Hub Host staff fallback and state service", () => {
     oldSchema.close();
 
     const migrated = new HubStore(path);
-    expect(migrated.schemaVersion()).toBe(7);
+    expect(migrated.schemaVersion()).toBe(9);
     expect(migrated.read()).toMatchObject({ revision: 1, snapshot });
     expect(migrated.readStaffPreferences(actor)).toMatchObject({
       favouriteStudentIds: [],
@@ -3265,7 +3322,7 @@ describe("local Hub Host staff fallback and state service", () => {
       kind: "pre_migration",
       schemaVersion: 1,
       fromSchemaVersion: 1,
-      toSchemaVersion: 7,
+      toSchemaVersion: 9,
       sourceRevision: 7,
       recordCounts: { hub_state: 1 },
       sourceSnapshotChecksum: checksum,
@@ -3304,7 +3361,7 @@ describe("local Hub Host staff fallback and state service", () => {
     expect(
       readdirSync(offHostPath).some(
         (file) =>
-          file.startsWith("pre-migration-v1-to-v7-") &&
+          file.startsWith("pre-migration-v1-to-v9-") &&
           file.endsWith(".sqlite.enc"),
       ),
     ).toBe(true);

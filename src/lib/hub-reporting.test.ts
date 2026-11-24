@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { hubMovementRows, hubMovementRowsToCsv } from './hub-reporting';
+import { hubMovementRows, hubMovementRowsToCsv, hubVisitSummaryRowsToCsv } from './hub-reporting';
 import type { HubVisit } from './types';
 
 describe('Hub movement reporting', () => {
@@ -57,5 +57,19 @@ describe('Hub movement reporting', () => {
     };
     const csv = hubMovementRowsToCsv(hubMovementRows([visit]));
     expect(csv.split('\n')[1].split(',')[8]).toBe('');
+  });
+
+  test('exports visit timestamps, prompt answers, and blank optional notes in one row', () => {
+    const visit: HubVisit = {
+      id: 'visit-4', studentId: 'student-4', studentName: 'Casey Example', destinationLabel: 'Support room',
+      source: 'classroom-notification', leftClassAt: '2026-11-23T03:00:00Z', arrivedAtHubAt: '2026-11-23T03:03:00Z',
+      leftHubAt: '2026-11-23T03:12:00Z', arrivedBackAtClassAt: '2026-11-23T03:16:00Z', hasConcern: false,
+      promptResponses: [{ promptId: 'q1', promptVersion: 1, destinationId: 'destination-4', stage: 'arrival', question: 'How are you?', responseType: 'written', required: false, answer: 'Okay', answeredAt: '2026-11-23T03:04:00Z' }],
+      temporaryTrips: [],
+    };
+    const csv = hubVisitSummaryRowsToCsv([visit]);
+    expect(csv).toContain('Left class at,Arrived at Hub,Left Hub,Returned to class');
+    expect(csv).toContain('How are you?: Okay');
+    expect(csv.split('\n')[1].split(',')[9]).toBe('');
   });
 });

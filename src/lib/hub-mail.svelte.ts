@@ -3,6 +3,7 @@ export type HubMailRecipient = {
   displayName: string;
   role: "ea" | "tic";
 };
+export type HubMailReply = { id: string; senderStaffId: string; senderDisplayName: string; note: string; submittedAt: string };
 
 export type HubConcernScope = "tic" | "all-staff" | "selected";
 export type HubConcernPolicy = {
@@ -27,6 +28,8 @@ export type HubMailMessage = {
   isRecipient: boolean;
   isTicOversight: boolean;
   readAt: string | null;
+  replies: HubMailReply[];
+  archivedAt: string | null;
 };
 
 export const hubMail = $state({
@@ -200,6 +203,24 @@ export async function markHubMailRead(messageId: string) {
   await refreshHubMail();
 }
 
+export async function replyToHubMail(messageId: string, note: string) {
+  const response = await fetch(`/api/v1/mail/${encodeURIComponent(messageId)}/replies`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note }),
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok) throw new Error(mailError(payload, "Your reply could not be saved."));
+  await refreshHubMail();
+}
+
+export async function archiveHubMail(messageId: string, archived: boolean) {
+  const response = await fetch(`/api/v1/mail/${encodeURIComponent(messageId)}/archive`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived }),
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok) throw new Error(mailError(payload, "The message could not be archived."));
+  await refreshHubMail();
+}
+
 export function dismissHubMailAlert() {
   hubMail.alertCount = 0;
 }
@@ -273,7 +294,13 @@ function isMailMessage(value: unknown): value is HubMailMessage {
     typeof value.isRecipient === "boolean" &&
     typeof value.isTicOversight === "boolean" &&
     (value.readAt === null || typeof value.readAt === "string")
+    && Array.isArray(value.replies) && value.replies.every(isMailReply)
+    && (value.archivedAt === null || typeof value.archivedAt === "string")
   );
+}
+
+function isMailReply(value: unknown): value is HubMailReply {
+  return isRecord(value) && typeof value.id === "string" && typeof value.senderStaffId === "string" && typeof value.senderDisplayName === "string" && typeof value.note === "string" && typeof value.submittedAt === "string";
 }
 
 function isMailRecipient(value: unknown): value is HubMailRecipient {

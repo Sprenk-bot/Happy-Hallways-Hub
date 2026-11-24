@@ -162,6 +162,13 @@ export type Destination = {
   kioskLabel?: string;
   /** Optional student-facing confirmation shown after the Hub Host saves an arrival. */
   kioskConfirmation?: string;
+  /** Optional expected duration for a Hub visit at this destination. */
+  hubTimerMinutes?: number;
+  hubTimerWarningMinutes?: number;
+  /** Whether the Hub timer waits until arrival questions have been answered. */
+  hubTimerStartsAfterArrivalPrompts?: boolean;
+  /** Whether overdue time counts upward instead of showing a negative countdown. */
+  hubOverdueCountsUp?: boolean;
   /** TIC opt-in for this destination to appear in classroom Inform the Hub. */
   informHubAvailable?: boolean;
   /**
@@ -405,7 +412,15 @@ export type HubVisit = {
   leftClassAt?: string;
   /** Shared operational indicator only; concern text is stored in the Host inbox. */
   hasConcern?: boolean;
+  /** Operational note recorded by Hub staff after checking in with the student. */
+  hubStaffNote?: string;
   arrivedAtHubAt?: string;
+  /** Hub timer settings are copied to the visit when the student arrives. */
+  timerStartedAt?: string;
+  hubTimerMinutes?: number;
+  hubOverdueCountsUp?: boolean;
+  hubExtraMinutes?: number;
+  timerStartsAfterArrivalPrompts?: boolean;
   leftBy?: HubVisitAttribution;
   leftHubAt?: string;
   arrivedBackAtClassAt?: string;
@@ -415,6 +430,8 @@ export type HubVisit = {
   temporaryTrips: TemporaryTrip[];
   /** Individual answers are immutable snapshots of the prompt configuration used. */
   promptResponses?: HubPromptResponseSnapshot[];
+  /** Records that an optional prompt stage was completed even when every response was blank. */
+  promptStagesCompleted?: HubPromptStage[];
   promptOverrides?: HubPromptOverrideSnapshot[];
 };
 

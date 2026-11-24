@@ -1,15 +1,44 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { account, currentSchedule } from "#lib/account.svelte.ts";
+  import { periodAt } from "#lib/schedule.ts";
   import Icon from "#lib/Icon.svelte";
   import { hubRuntime } from "#lib/hub-runtime.svelte.ts";
   import {
     hubMail,
+    archiveHubMail,
     markHubMailRead,
     refreshHubMail,
+    replyToHubMail,
   } from "#lib/hub-mail.svelte.ts";
 
   let savingMessageId = $state("");
   let actionError = $state("");
+  let search = $state("");
+  let replyDrafts = $state<Record<string, string>>({});
+  let replyingTo = $state("");
+  let showArchived = $state(false);
+  const currentSchedulePeriod = $derived(periodAt(currentSchedule()));
+  const currentPeriodLabel = $derived(currentSchedulePeriod ? `${currentSchedulePeriod.start}–${currentSchedulePeriod.end}` : '');
+
+  const filteredMessages = $derived.by(() => {
+    const needle = search.trim().toLocaleLowerCase();
+    return hubMail.messages.filter((message) => (!message.archivedAt || (hubRuntime.session?.role === 'tic' && showArchived)) && (!needle || [message.studentName, message.destinationLabel, message.senderDisplayName, message.note, ...message.recipients.map((recipient) => recipient.displayName), ...message.replies.map((reply) => `${reply.senderDisplayName} ${reply.note}`)].some((value) => value.toLocaleLowerCase().includes(needle))));
+  });
+
+  const messageDays = $derived.by(() => {
+    const byDay = new Map<string, { key: string; label: string; periods: Map<string, typeof filteredMessages> }>();
+    for (const message of filteredMessages) {
+      const key = message.submittedAt.slice(0, 10);
+      const day = byDay.get(key) ?? { key, label: new Date(message.submittedAt).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }), periods: new Map<string, typeof filteredMessages>() };
+      const visit = account.hubVisits.find((item) => item.id === message.visitId);
+      const period = visit?.periodName ? null : periodAt(currentSchedule(), Date.parse(message.submittedAt));
+      const periodName = visit?.periodName || (period ? `${period.start}–${period.end}` : 'Outside scheduled periods');
+      day.periods.set(periodName, [...(day.periods.get(periodName) ?? []), message]);
+      byDay.set(key, day);
+    }
+    return [...byDay.values()].sort((a, b) => b.key.localeCompare(a.key)).map((day) => ({ ...day, periodGroups: [...day.periods.entries()].sort(([a], [b]) => a.localeCompare(b)) }));
+  });
 
   onMount(() => {
     if (hubRuntime.hosted) void refreshHubMail();
@@ -28,6 +57,24 @@
     } finally {
       savingMessageId = "";
     }
+  }
+
+  async function sendReply(messageId: string) {
+    replyingTo = messageId;
+    actionError = "";
+    try {
+      await replyToHubMail(messageId, replyDrafts[messageId] ?? "");
+      replyDrafts[messageId] = "";
+    } catch (error) {
+      actionError = error instanceof Error ? error.message : "The reply could not be saved.";
+    } finally {
+      replyingTo = "";
+    }
+  }
+
+  async function toggleArchive(messageId: string, archived: boolean) {
+    try { await archiveHubMail(messageId, archived); }
+    catch (error) { actionError = error instanceof Error ? error.message : 'The message could not be archived.'; }
   }
 </script>
 
@@ -60,8 +107,17 @@
   {/if}
 
   {#if hubRuntime.hosted && hubMail.messages.length}
+    <label class="mail-search">Search messages <input type="search" bind:value={search} placeholder="Student, staff member, or concern" /></label>
+    {#if hubRuntime.session?.role === 'tic'}<label class="archive-toggle"><input type="checkbox" bind:checked={showArchived} /> Show archived messages</label>{/if}
     <section class="mail-list" aria-label="Hub concern messages">
-      {#each hubMail.messages as message (message.id)}
+      {#if !messageDays.length}<p class="muted">No messages match this search.</p>{/if}
+      {#each messageDays as day (day.key)}
+        <details class="mail-day" open={day.key === new Date().toISOString().slice(0, 10)}>
+          <summary>{day.label}</summary>
+          {#each day.periodGroups as [periodName, periodMessages] (periodName)}
+            <details class="mail-period" open={day.key === new Date().toISOString().slice(0, 10) && periodName === currentPeriodLabel}>
+              <summary>{periodName} ({periodMessages.length})</summary>
+              {#each periodMessages as message (message.id)}
         <article class="card mail-item" class:unread={message.isRecipient && !message.readAt}>
           <div class="mail-heading">
             <div>
@@ -83,6 +139,20 @@
           </div>
 
           <p class="mail-note">{message.note}</p>
+          {#if message.archivedAt}<p class="muted small">Archived {new Date(message.archivedAt).toLocaleString()}.</p>{/if}
+
+          {#if message.replies.length}
+            <section class="reply-thread" aria-label="Replies to this message">
+              {#each message.replies as reply (reply.id)}
+                <article class="reply-item"><p class="mail-meta">{reply.senderDisplayName} · {new Date(reply.submittedAt).toLocaleString()}</p><p class="mail-note">{reply.note}</p></article>
+              {/each}
+            </section>
+          {/if}
+
+          <form class="reply-form" onsubmit={(event) => { event.preventDefault(); void sendReply(message.id); }}>
+            <label>Reply in this message chain<textarea rows="2" maxlength="2000" bind:value={replyDrafts[message.id]} placeholder="Write a reply for the staff on this message"></textarea></label>
+            <button class="btn btn-small" disabled={replyingTo === message.id || !(replyDrafts[message.id] ?? '').trim()}>{replyingTo === message.id ? 'Saving…' : 'Reply'}</button>
+          </form>
 
           <details>
             <summary>Routing details</summary>
@@ -106,7 +176,12 @@
           {:else if message.isRecipient && message.readAt}
             <p class="muted small">Read {new Date(message.readAt).toLocaleString()}.</p>
           {/if}
+          {#if hubRuntime.session?.role === 'tic'}<button class="btn btn-small btn-quiet" onclick={() => void toggleArchive(message.id, !message.archivedAt)}>{message.archivedAt ? 'Unarchive message' : 'Archive message'}</button>{/if}
         </article>
+              {/each}
+            </details>
+          {/each}
+        </details>
       {/each}
     </section>
   {:else if hubRuntime.hosted && !hubMail.error}
@@ -122,7 +197,7 @@
   .page {
     display: grid;
     gap: 18px;
-    max-width: 920px;
+    max-width: 1180px;
     margin: 0 auto;
   }
 
@@ -161,6 +236,18 @@
     display: grid;
     gap: 12px;
   }
+  .mail-search { display:grid; gap:6px; max-width:560px; font-weight:700; }
+  .archive-toggle { display:flex; gap:8px; align-items:center; }
+  .mail-search input { min-height:42px; padding:8px 12px; border:1px solid var(--border-strong); border-radius:8px; }
+  .mail-day, .mail-period { display:grid; gap:10px; }
+  .mail-day > summary, .mail-period > summary { padding:10px 12px; border-radius:8px; background:var(--surface-sunk); font-weight:800; cursor:pointer; }
+  .mail-period { margin:10px 0 0 14px; }
+  .reply-thread { display:grid; gap:8px; border-left:3px solid var(--border); padding-left:12px; }
+  .reply-item { padding:10px 12px; border-radius:8px; background:var(--surface-sunk); }
+  .reply-item p { margin:0; }
+  .reply-form { display:flex; align-items:end; gap:8px; }
+  .reply-form label { display:grid; flex:1; gap:5px; font-weight:700; }
+  .reply-form textarea { width:100%; box-sizing:border-box; padding:9px; border:1px solid var(--border-strong); border-radius:8px; font:inherit; }
 
   .mail-item {
     display: grid;

@@ -140,3 +140,23 @@ export function hubMovementRowsToCsv(rows: HubMovementRow[]) {
     ]);
   return [headings, ...lines].map((line) => line.map(csvCell).join(',')).join('\n');
 }
+
+/** One row per visit with the timestamps staff need for end-of-day reporting. */
+export function hubVisitSummaryRowsToCsv(visits: HubVisit[], staffName: (id: string, fallback: string) => string = (_id, fallback) => fallback) {
+  const headings = ['Student', 'Year group', 'Destination', 'Class', 'Period', 'Left class at', 'Arrived at Hub', 'Left Hub', 'Returned to class', 'Concern recorded', 'Student question responses', 'Hub staff note'];
+  const rows = visits.map((visit) => [
+    staffName(visit.studentId, visit.studentName),
+    visit.studentCategory?.name ?? '',
+    visit.destinationLabel,
+    visit.className ?? '',
+    visit.periodName ?? '',
+    visit.leftClassAt ?? '',
+    visit.arrivedAtHubAt ?? '',
+    visit.leftHubAt ?? '',
+    visit.arrivedBackAtClassAt ?? '',
+    visit.hasConcern ? 'Yes' : '',
+    (visit.promptResponses ?? []).map(answerText).join(' | '),
+    visit.hubStaffNote ?? '',
+  ]);
+  return [headings, ...rows].map((line) => line.map(csvCell).join(',')).join('\n');
+}

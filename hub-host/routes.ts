@@ -328,6 +328,13 @@ function isHubKioskMovementRequest(
         : isHubKioskPromptData(value))
     );
   }
+  if (value.action === "prompts") {
+    return (
+      Object.keys(value).every((key) => ["action", "visitId", "stage", "pin", "promptVersion", "promptAnswers"].includes(key)) &&
+      typeof value.visitId === "string" && value.visitId.length > 0 && value.visitId.length <= 128 &&
+      (value.stage === "arrival" || value.stage === "departure") && isHubKioskPromptData(value)
+    );
+  }
   if (value.action === "direct-arrive") {
     return (
       Object.keys(value).every((key) =>
@@ -831,7 +838,7 @@ export async function routeBackups(
 }
 
 /** Mail recipient listing, inbox listing and mark-as-read. */
-export function routeMail(context: RouteContext, url: URL): boolean {
+export async function routeMail(context: RouteContext, url: URL): Promise<boolean> {
   const { request, response, store } = context;
 
   if (url.pathname === "/api/v1/mail/recipients" && request.method === "GET") {
@@ -846,6 +853,30 @@ export function routeMail(context: RouteContext, url: URL): boolean {
     return true;
   }
 
+  const mailReplyMatch = /^\/api\/v1\/mail\/([a-f0-9-]+)\/replies$/i.exec(url.pathname);
+  if (mailReplyMatch && request.method === "POST") {
+    if (requireStaff(context)) return true;
+    const body = await readJsonRequest(request);
+    if (!isRecord(body) || typeof body.note !== "string") {
+      writeJson(response, 400, { error: "invalid_mail_reply" });
+      return true;
+    }
+    writeJson(response, 201, store.createHubMailReply(guardedActor(context), mailReplyMatch[1], body.note));
+    return true;
+  }
+
+  const mailArchiveMatch = /^\/api\/v1\/mail\/([a-f0-9-]+)\/archive$/i.exec(url.pathname);
+  if (mailArchiveMatch && request.method === "POST") {
+    if (requireTic(context)) return true;
+    const body = await readJsonRequest(request);
+    if (!isRecord(body) || typeof body.archived !== "boolean") {
+      writeJson(response, 400, { error: "invalid_mail_archive_request" });
+      return true;
+    }
+    writeJson(response, 200, store.setHubMailArchived(guardedActor(context), mailArchiveMatch[1], body.archived));
+    return true;
+  }
+
   const mailReadMatch = /^\/api\/v1\/mail\/([a-f0-9-]+)\/read$/i.exec(
     url.pathname,
   );
@@ -856,6 +887,26 @@ export function routeMail(context: RouteContext, url: URL): boolean {
   }
 
   return false;
+}
+
+/** Staff adjustments to an active Hub visit timer. */
+export async function routeHubVisitActions(context: RouteContext, url: URL): Promise<boolean> {
+  const { request, response, store } = context;
+  const match = /^\/api\/v1\/hub-visits\/([A-Za-z0-9-]+)\/(time|note)$/.exec(url.pathname);
+  if (!match || request.method !== "POST") return false;
+  if (requireStaff(context)) return true;
+  const body = await readJsonRequest(request);
+  if (!isRecord(body)) { writeJson(response, 400, { error: "invalid_hub_visit_action" }); return true; }
+  if (match[2] === "note") {
+    if (typeof body.note !== "string") { writeJson(response, 400, { error: "invalid_hub_staff_note" }); return true; }
+    const saved = store.updateHubVisitStaffNote(guardedActor(context), match[1], body.note);
+    writeJson(response, 200, { revision: saved.revision, savedAt: saved.savedAt, snapshot: saved.snapshot });
+    return true;
+  }
+  if (typeof body.minutes !== "number" || !Number.isSafeInteger(body.minutes)) { writeJson(response, 400, { error: "invalid_hub_timer_extension" }); return true; }
+  const saved = store.extendHubVisitTimer(guardedActor(context), match[1], body.minutes);
+  writeJson(response, 200, { revision: saved.revision, savedAt: saved.savedAt, snapshot: saved.snapshot });
+  return true;
 }
 
 /** Invitation listing, creation and revocation (TIC only). */

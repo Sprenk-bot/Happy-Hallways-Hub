@@ -24,20 +24,20 @@ const approvals = { home: 'on Home', pin: 'with PIN' };
  * saw leave the duration blank rather than reporting minutes nobody measured.
  * A denied request is a row of its own, at the time the student asked.
  */
-export function historyToCsv(rows: HistoryRow[], className: (id: string) => string) {
+export function historyToCsv(rows: HistoryRow[], className: (id: string) => string, studentName: (id: string, fallback: string) => string = (_id, fallback) => fallback) {
   const lines = [...rows]
     .sort((a, b) => a.at.localeCompare(b.at))
     .map((row) => {
       if (row.kind === 'denied') {
         const request = row.request;
-        const asked = [dayKey(request.askedAt), className(request.classId), request.studentName, request.destination, time(request.askedAt)];
+        const asked = [dayKey(request.askedAt), className(request.classId), studentName(request.studentId, request.studentName), request.destination, time(request.askedAt)];
         return [...asked, '', '', '', '', '', '', '', '', '', 'request denied', '', ''];
       }
       const pass = row.pass;
       return [
         dayKey(pass.outAt),
         className(pass.classId),
-        pass.studentName,
+        studentName(pass.studentId, pass.studentName),
         pass.destination,
         time(pass.outAt),
         pass.inAt ? time(pass.inAt) : '',

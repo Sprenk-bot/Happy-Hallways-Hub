@@ -60,6 +60,8 @@ export type HubKioskActivation = {
 export type HubKioskStudent = {
   id: string;
   studentName: string;
+  categoryName?: string;
+  categoryColor?: string;
   status:
     | "in-class"
     | "on-the-way"
@@ -75,6 +77,10 @@ export type HubKioskStudent = {
   promptVersion?: number;
   arrivalPrompts?: HubVisitPrompt[];
   departurePrompts?: HubVisitPrompt[];
+  timerStartedAt?: string;
+  timerMinutes?: number;
+  overdueCountsUp?: boolean;
+  timerWarningMinutes?: number;
 };
 
 export type HubKioskDestination = {
@@ -103,6 +109,7 @@ type HubPromptCollection = {
 };
 
 export type HubKioskMovementRequest =
+  | ({ action: "prompts"; visitId: string; stage: HubPromptStage; pin?: string } & HubKioskPromptData)
   | ({
       action: "arrive" | "leave";
       visitId: string;
@@ -179,6 +186,8 @@ export type HubMailRecipient = {
   role: StaffRole;
 };
 
+export type HubMailReply = { id: string; senderStaffId: string; senderDisplayName: string; note: string; submittedAt: string };
+
 export type HubConcernPolicy = {
   availableScopes: HubConcernScope[];
   defaultScope: HubConcernScope;
@@ -201,6 +210,8 @@ export type HubMailMessage = {
   isRecipient: boolean;
   isTicOversight: boolean;
   readAt: string | null;
+  replies: HubMailReply[];
+  archivedAt: string | null;
 };
 
 export type IssuedInvitation = StaffInvitationView & { token: string };
@@ -253,7 +264,7 @@ type ProfileRow = {
 
 export type EntraLogin = { actor: StaffActor; sessionToken: string };
 
-const databaseSchemaVersion = 7;
+const databaseSchemaVersion = 9;
 export const invitationLifetimeMs = 10 * 60_000;
 export const deviceSessionLifetimeMs = 30 * 24 * 60 * 60_000;
 export const hubKioskActivationLifetimeMs = 10 * 60_000;
@@ -333,7 +344,8 @@ export class HubKioskPromptError extends Error {
     readonly code:
       | "required_hub_prompt_missing"
       | "invalid_hub_prompt_response"
-      | "hub_prompt_configuration_changed",
+      | "hub_prompt_configuration_changed"
+      | "hub_prompt_responses_already_saved",
   ) {
     super(code);
     this.name = "HubKioskPromptError";
@@ -742,7 +754,9 @@ export class HubStore {
       // Shared prelude: each branch resolves, mutates `visits`, and reports
       // the audit event plus kiosk feedback for the committed snapshot.
       const outcome =
-        request.action === "direct-arrive"
+        request.action === "prompts"
+          ? this.kioskPromptAnswers(snapshot, visits, request, occurredAt)
+          : request.action === "direct-arrive"
           ? this.kioskDirectArrive(snapshot, visits, request, occurredAt)
           : this.kioskVisitAction(snapshot, visits, request, occurredAt);
 
@@ -770,11 +784,79 @@ export class HubStore {
     })();
   }
 
+  extendHubVisitTimer(actor: StaffActor, visitId: string, minutes: number) {
+    if (!Number.isSafeInteger(minutes) || minutes < 1 || minutes > 60) {
+      throw new TypeError("Add between 1 and 60 minutes.");
+    }
+    return this.database.transaction(() => {
+      const previous = this.readStoredRowOrThrow();
+      const visits = snapshotArray(previous.snapshot.hubVisits);
+      const index = visits.findIndex((visit) => visit.id === visitId);
+      const visit = visits[index];
+      if (!visit || typeof visit.arrivedAtHubAt !== "string" || visit.leftHubAt || visit.arrivedBackAtClassAt || visit.cancelledAt || typeof visit.hubTimerMinutes !== "number") {
+        throw new RolePermissionError();
+      }
+      visits[index] = { ...visit, hubExtraMinutes: (typeof visit.hubExtraMinutes === "number" ? visit.hubExtraMinutes : 0) + minutes };
+      const saved = this.commitStaffSnapshot(previous, { ...previous.snapshot, hubVisits: visits }, actor, "hub_visit_timer_extended", { hubVisitId: visitId, studentId: visit.studentId, addedMinutes: minutes });
+      return { revision: saved.revision, savedAt: saved.savedAt, snapshot: saved.snapshot };
+    })();
+  }
+
+  updateHubVisitStaffNote(actor: StaffActor, visitId: string, rawNote: string) {
+    const note = rawNote.trim();
+    if (note.length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(note)) throw new TypeError("Hub staff notes must be 1,000 characters or fewer.");
+    return this.database.transaction(() => {
+      const previous = this.readStoredRowOrThrow();
+      const visits = snapshotArray(previous.snapshot.hubVisits);
+      const index = visits.findIndex((visit) => visit.id === visitId);
+      const visit = visits[index];
+      if (!visit || !visit.arrivedAtHubAt || visit.cancelledAt) throw new RolePermissionError();
+      const updated = { ...visit };
+      if (note) updated.hubStaffNote = note;
+      else delete updated.hubStaffNote;
+      visits[index] = updated;
+      const saved = this.commitStaffSnapshot(previous, { ...previous.snapshot, hubVisits: visits }, actor, "hub_visit_staff_note_saved", { hubVisitId: visitId, studentId: visit.studentId, notePresent: !!note });
+      return { revision: saved.revision, savedAt: saved.savedAt, snapshot: saved.snapshot };
+    })();
+  }
+
+  private kioskPromptAnswers(
+    snapshot: StateSnapshot,
+    visits: Record<string, unknown>[],
+    request: Extract<HubKioskMovementRequest, { action: "prompts" }>,
+    occurredAt: string,
+  ): KioskActionOutcome {
+    const index = visits.findIndex((visit) => visit.id === request.visitId);
+    const visit = visits[index];
+    if (!visit || typeof visit.studentId !== "string") throw new RecordNotFoundError();
+    const student = snapshotArray(snapshot.roster).find((entry) => entry.id === visit.studentId);
+    if (!student || (hubKioskPinRequired(snapshot, student, typeof visit.classId === "string" ? visit.classId : undefined) && request.pin !== student.pin)) throw new HubKioskPinError();
+    const movementExists = request.stage === "arrival" ? typeof visit.arrivedAtHubAt === "string" : typeof visit.leftHubAt === "string";
+    if (!movementExists || visit.arrivedBackAtClassAt || visit.cancelledAt) throw new RolePermissionError();
+    const completedStages = completedPromptStages(visit);
+    const responses = snapshotArray(visit.promptResponses);
+    if (completedStages.includes(request.stage) || responses.some((response) => response.stage === request.stage)) {
+      throw new HubKioskPromptError("hub_prompt_responses_already_saved");
+    }
+    const destination = snapshotArray(snapshot.destinations).find((entry) => entry.id === visit.destinationId);
+    const collection = collectHubPromptResponses(snapshot, typeof visit.destinationId === "string" ? visit.destinationId : undefined, destination, visit.studentId, request.stage, request, occurredAt);
+    visits[index] = { ...visit, ...hubVisitPromptData(visit, collection), promptStagesCompleted: [...completedStages, request.stage] };
+    if (request.stage === "arrival" && visit.timerStartsAfterArrivalPrompts && !visit.timerStartedAt) {
+      visits[index] = { ...visits[index], timerStartedAt: occurredAt };
+    }
+    return {
+      eventType: "hub_visit_kiosk_prompts_answered",
+      details: { hubVisitId: visit.id, studentId: visit.studentId, stage: request.stage, ...hubPromptAuditDetails(collection) },
+      chime: "none",
+      promptOverrideToConsume: collection.overrideId,
+    };
+  }
+
   /** Resolves a visit-scoped kiosk action (arrive/leave/temporary trips). */
   private kioskVisitAction(
     snapshot: StateSnapshot,
     visits: Record<string, unknown>[],
-    request: Exclude<HubKioskMovementRequest, { action: "direct-arrive" }>,
+    request: Exclude<HubKioskMovementRequest, { action: "direct-arrive" | "prompts" }>,
     occurredAt: string,
   ): KioskActionOutcome {
     const visitIndex = visits.findIndex((each) => each.id === request.visitId);
@@ -806,7 +888,6 @@ export class HubStore {
       result = this.kioskArrive(
         snapshot,
         visit,
-        request as Extract<HubKioskMovementRequest, { action: "arrive" }>,
         occurredAt,
       );
     } else if (request.action === "temporary-start") {
@@ -825,7 +906,6 @@ export class HubStore {
         snapshot,
         visit,
         trips,
-        request as Extract<HubKioskMovementRequest, { action: "leave" }>,
         occurredAt,
       );
     }
@@ -836,7 +916,6 @@ export class HubStore {
   private kioskArrive(
     snapshot: StateSnapshot,
     visit: Record<string, unknown>,
-    request: Extract<HubKioskMovementRequest, { action: "arrive" }>,
     occurredAt: string,
   ): { visit: Record<string, unknown>; outcome: KioskActionOutcome } {
     if (
@@ -854,34 +933,29 @@ export class HubStore {
     const destination = snapshotArray(snapshot.destinations).find(
       (each) => each.id === visit.destinationId,
     );
-    const promptCollection = collectHubPromptResponses(
-      snapshot,
-      typeof visit.destinationId === "string" ? visit.destinationId : undefined,
-      destination,
-      String(visit.studentId ?? ""),
-      "arrival",
-      request,
-      occurredAt,
-    );
     return {
       visit: {
         ...visit,
         arrivedAtHubAt: occurredAt,
         arrivedBy: { type: "student-kiosk" },
-        ...hubVisitPromptData(visit, promptCollection),
+        ...(typeof destination?.hubTimerMinutes === "number" ? {
+          hubTimerMinutes: destination.hubTimerMinutes,
+          hubTimerWarningMinutes: destination.hubTimerWarningMinutes ?? 2,
+          hubOverdueCountsUp: destination.hubOverdueCountsUp === true,
+          timerStartsAfterArrivalPrompts: destination.hubTimerStartsAfterArrivalPrompts === true && hubPromptsForDestination(destination, "arrival").length > 0,
+          ...(destination.hubTimerStartsAfterArrivalPrompts !== true || !hubPromptsForDestination(destination, "arrival").length ? { timerStartedAt: occurredAt } : {}),
+        } : {}),
       },
       outcome: {
         eventType: "hub_visit_kiosk_arrived",
         details: {
           hubVisitId: visit.id,
           studentId: visit.studentId,
-          ...hubPromptAuditDetails(promptCollection),
         },
         chime: destination ? kioskArrivalChime(destination) : "none",
         confirmationMessage: destination
           ? kioskDestinationConfirmation(destination)
           : undefined,
-        promptOverrideToConsume: promptCollection.overrideId,
       },
     };
   }
@@ -995,7 +1069,6 @@ export class HubStore {
     snapshot: StateSnapshot,
     visit: Record<string, unknown>,
     trips: Record<string, unknown>[],
-    request: Extract<HubKioskMovementRequest, { action: "leave" }>,
     occurredAt: string,
   ): { visit: Record<string, unknown>; outcome: KioskActionOutcome } {
     if (
@@ -1009,33 +1082,19 @@ export class HubStore {
     ) {
       throw new RolePermissionError();
     }
-    const promptCollection = collectHubPromptResponses(
-      snapshot,
-      typeof visit.destinationId === "string" ? visit.destinationId : undefined,
-      snapshotArray(snapshot.destinations).find(
-        (each) => each.id === visit.destinationId,
-      ),
-      String(visit.studentId ?? ""),
-      "departure",
-      request,
-      occurredAt,
-    );
     return {
       visit: {
         ...visit,
         leftHubAt: occurredAt,
         leftBy: { type: "student-kiosk" },
-        ...hubVisitPromptData(visit, promptCollection),
       },
       outcome: {
         eventType: "hub_visit_kiosk_left",
         details: {
           hubVisitId: visit.id,
           studentId: visit.studentId,
-          ...hubPromptAuditDetails(promptCollection),
         },
         chime: readHubKioskSoundSettings(snapshot).commonChime,
-        promptOverrideToConsume: promptCollection.overrideId,
       },
     };
   }
@@ -1088,15 +1147,6 @@ export class HubStore {
     ) {
       throw new RolePermissionError();
     }
-    const promptCollection = collectHubPromptResponses(
-      snapshot,
-      destination.id,
-      destination,
-      student.id,
-      "arrival",
-      request,
-      occurredAt,
-    );
     const category = snapshotArray(snapshot.studentCategories).find(
       (each) => each.id === student.categoryId,
     );
@@ -1119,8 +1169,14 @@ export class HubStore {
       source: "direct-kiosk-arrival",
       arrivedAtHubAt: occurredAt,
       arrivedBy: { type: "student-kiosk" },
+      ...(typeof destination.hubTimerMinutes === "number" ? {
+        hubTimerMinutes: destination.hubTimerMinutes,
+        hubTimerWarningMinutes: destination.hubTimerWarningMinutes ?? 2,
+        hubOverdueCountsUp: destination.hubOverdueCountsUp === true,
+        timerStartsAfterArrivalPrompts: destination.hubTimerStartsAfterArrivalPrompts === true && hubPromptsForDestination(destination, "arrival").length > 0,
+        ...(destination.hubTimerStartsAfterArrivalPrompts !== true || !hubPromptsForDestination(destination, "arrival").length ? { timerStartedAt: occurredAt } : {}),
+      } : {}),
       temporaryTrips: [],
-      ...hubVisitPromptData({}, promptCollection),
     };
     visits.push(updated);
     return {
@@ -1129,11 +1185,9 @@ export class HubStore {
         hubVisitId: updated.id,
         studentId: student.id,
         destinationId: destination.id,
-        ...hubPromptAuditDetails(promptCollection),
       },
       chime: kioskArrivalChime(destination),
       confirmationMessage: kioskDestinationConfirmation(destination),
-      promptOverrideToConsume: promptCollection.overrideId,
     };
   }
 
@@ -2273,18 +2327,22 @@ export class HubStore {
                 c.sender_staff_id AS senderStaffId,
                 c.sender_display_name AS senderDisplayName,
                 c.routing_scope AS scope, c.note, c.submitted_at AS submittedAt
+                , a.archived_at AS archivedAt
          FROM hub_concerns c
-         WHERE c.sender_staff_id = ?
+         LEFT JOIN hub_mail_archives a ON a.concern_id = c.concern_id
+         WHERE (c.sender_staff_id = ?
             OR EXISTS (
               SELECT 1 FROM hub_concern_recipients r
               WHERE r.concern_id = c.concern_id AND r.staff_profile_id = ?
             )
-            OR ? = 'tic'
+            OR ? = 'tic')
+           AND (? = 'tic' OR a.archived_at IS NULL)
          ORDER BY c.submitted_at DESC, c.concern_id`,
       )
-      .all<Omit<HubMailMessage, "recipients" | "isSender" | "isRecipient" | "isTicOversight" | "readAt">>(
+      .all<Omit<HubMailMessage, "recipients" | "isSender" | "isRecipient" | "isTicOversight" | "readAt" | "replies">>(
         actor.staffId,
         actor.staffId,
+        actor.role,
         actor.role,
       );
     const messages = rows.map((row): HubMailMessage => {
@@ -2304,6 +2362,7 @@ export class HubStore {
         )
         .get<{ readAt: string | null }>(row.id, actor.staffId);
       const isRecipient = !!recipient;
+      const replies = this.database.query(`SELECT reply_id AS id, sender_staff_id AS senderStaffId, sender_display_name AS senderDisplayName, note, submitted_at AS submittedAt FROM hub_mail_replies WHERE concern_id = ? ORDER BY submitted_at, reply_id`).all<HubMailReply>(row.id);
       return {
         ...row,
         recipients,
@@ -2311,6 +2370,7 @@ export class HubStore {
         isRecipient,
         isTicOversight: actor.role === "tic" && !isSender && !isRecipient,
         readAt: recipient?.readAt ?? null,
+        replies,
       };
     });
     const unreadCount =
@@ -2321,6 +2381,21 @@ export class HubStore {
         )
         .get<{ count: number }>(actor.staffId)?.count ?? 0;
     return { messages, unreadCount };
+  }
+
+  setHubMailArchived(actor: StaffActor, concernId: string, archived: boolean) {
+    requireTic(actor);
+    const message = this.listHubMail(actor).messages.find((item) => item.id === concernId);
+    if (!message) throw new RecordNotFoundError();
+    this.database.transaction(() => {
+      if (archived) {
+        this.database.query(`INSERT OR REPLACE INTO hub_mail_archives (concern_id, archived_by_staff_id, archived_at) VALUES (?, ?, ?)`).run(concernId, actor.staffId, new Date().toISOString());
+      } else {
+        this.database.query(`DELETE FROM hub_mail_archives WHERE concern_id = ?`).run(concernId);
+      }
+      this.appendAuditEvent(archived ? "hub_mail_archived" : "hub_mail_unarchived", actor, { concernId });
+    })();
+    return { archived };
   }
 
   markHubMailRead(
@@ -2347,6 +2422,21 @@ export class HubStore {
       this.appendAuditEvent("hub_concern_read", actor, { concernId });
       return { readAt };
     })();
+  }
+
+  createHubMailReply(actor: StaffActor, concernId: string, rawNote: string) {
+    const note = rawNote.trim();
+    if (note.length < 1 || note.length > 2000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(note)) {
+      throw new TypeError("Replies must be 1 to 2000 characters.");
+    }
+    const parent = this.listHubMail(actor).messages.find((message) => message.id === concernId);
+    if (!parent) throw new RolePermissionError();
+    const reply = { id: randomUUID(), senderStaffId: actor.staffId, senderDisplayName: actor.displayName, note, submittedAt: new Date().toISOString() };
+    this.database.transaction(() => {
+      this.database.query(`INSERT INTO hub_mail_replies (reply_id, concern_id, sender_staff_id, sender_display_name, note, submitted_at) VALUES (?, ?, ?, ?, ?, ?)`).run(reply.id, concernId, actor.staffId, actor.displayName, note, reply.submittedAt);
+      this.appendAuditEvent("hub_mail_reply_sent", actor, { concernId, replyId: reply.id });
+    })();
+    return reply;
   }
 
   listInvitations(actor: StaffActor): StaffInvitationView[] {
@@ -2806,7 +2896,7 @@ export class HubStore {
       mergeMode: "direct",
       previousChecksum: previous.checksum,
       checksum,
-      source: "staff-prompt-override",
+      source: "staff-operation",
     });
     return { revision, savedAt, checksum, snapshot };
   }
@@ -3135,6 +3225,41 @@ export class HubStore {
             ON hub_kiosk_sessions (expires_at, revoked_at);
           UPDATE hub_state SET schema_version = 7 WHERE schema_version = 6;
           PRAGMA user_version = 7;
+        `);
+      })();
+      currentVersion = 7;
+    }
+
+    if (currentVersion < 8) {
+      this.database.transaction(() => {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS hub_mail_replies (
+            reply_id TEXT PRIMARY KEY,
+            concern_id TEXT NOT NULL REFERENCES hub_concerns(concern_id),
+            sender_staff_id TEXT NOT NULL REFERENCES staff_profiles(id),
+            sender_display_name TEXT NOT NULL,
+            note TEXT NOT NULL,
+            submitted_at TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS hub_mail_replies_thread
+            ON hub_mail_replies (concern_id, submitted_at);
+          UPDATE hub_state SET schema_version = 8 WHERE schema_version = 7;
+          PRAGMA user_version = 8;
+        `);
+      })();
+      currentVersion = 8;
+    }
+
+    if (currentVersion < 9) {
+      this.database.transaction(() => {
+        this.database.exec(`
+          CREATE TABLE IF NOT EXISTS hub_mail_archives (
+            concern_id TEXT PRIMARY KEY REFERENCES hub_concerns(concern_id),
+            archived_by_staff_id TEXT NOT NULL REFERENCES staff_profiles(id),
+            archived_at TEXT NOT NULL
+          );
+          UPDATE hub_state SET schema_version = 9 WHERE schema_version = 8;
+          PRAGMA user_version = 9;
         `);
       })();
     }
@@ -3766,6 +3891,12 @@ function snapshotArray(value: unknown): Record<string, unknown>[] {
   return value;
 }
 
+function completedPromptStages(visit: Record<string, unknown>) {
+  return Array.isArray(visit.promptStagesCompleted)
+    ? visit.promptStagesCompleted.filter((stage): stage is HubPromptStage => stage === "arrival" || stage === "departure")
+    : [];
+}
+
 function hubKioskPinRequired(
   snapshot: StateSnapshot,
   student: Record<string, unknown>,
@@ -4103,6 +4234,9 @@ function buildKioskStudent(
   destinations: Record<string, unknown>[],
   overrides: HubPromptOverride[],
 ): HubKioskStudent {
+  const category = snapshotArray(snapshot.studentCategories).find(
+    (each) => each.id === student.categoryId,
+  );
   const studentMovements = movements.filter(
     (visit) => visit.studentId === student.id,
   );
@@ -4157,16 +4291,12 @@ function buildKioskStudent(
   else if (visit?.source === "classroom-notification" && !visit.arrivedAtHubAt) {
     status = "on-the-way";
   } else if (visit) status = "needs-staff";
-  const promptStage =
-    status === "on-the-way"
-      ? "arrival"
-      : status === "at-hub"
-        ? "departure"
-        : undefined;
-
   return {
     id: student.id,
     studentName: `${student.firstName}${prefix ? ` ${prefix}.` : ""}`,
+    ...(category && typeof category.name === "string"
+      ? { categoryName: category.name, ...(typeof category.color === "string" ? { categoryColor: category.color } : {}) }
+      : {}),
     status,
     pinRequired: hubKioskPinRequired(
       snapshot,
@@ -4181,24 +4311,18 @@ function buildKioskStudent(
             : "Hub visit",
         }
       : {}),
-    ...(visitDestination && promptStage
+    ...(visitDestination && visit
       ? {
           promptVersion,
-          ...(promptStage === "departure"
-            ? {
-                departurePrompts: promptsForKiosk(
-                  visitDestination,
-                  "departure",
-                  promptOverrideFor("departure"),
-                ),
-              }
-            : {
-                arrivalPrompts: promptsForKiosk(
-                  visitDestination,
-                  "arrival",
-                  promptOverrideFor("arrival"),
-                ),
-              }),
+          ...(typeof visit.timerStartedAt === "string" && typeof visit.hubTimerMinutes === "number" ? { timerStartedAt: visit.timerStartedAt, timerMinutes: visit.hubTimerMinutes + (typeof visit.hubExtraMinutes === "number" ? visit.hubExtraMinutes : 0), overdueCountsUp: visit.hubOverdueCountsUp === true, timerWarningMinutes: typeof visit.hubTimerWarningMinutes === "number" ? visit.hubTimerWarningMinutes : 2 } : {}),
+          ...((status === "on-the-way" || visit.arrivedAtHubAt) && !completedPromptStages(visit).includes("arrival") && !snapshotArray(visit.promptResponses).some((response) => response.stage === "arrival")
+            ? { arrivalPrompts: promptsForKiosk(visitDestination, "arrival", promptOverrideFor("arrival")) }
+            : {}),
+          ...(visit.leftHubAt && !completedPromptStages(visit).includes("departure") && !snapshotArray(visit.promptResponses).some((response) => response.stage === "departure")
+            ? { departurePrompts: promptsForKiosk(visitDestination, "departure", promptOverrideFor("departure")) }
+            : status === "at-hub" && !completedPromptStages(visit).includes("departure") && !snapshotArray(visit.promptResponses).some((response) => response.stage === "departure")
+              ? { departurePrompts: promptsForKiosk(visitDestination, "departure", promptOverrideFor("departure")) }
+              : {}),
         }
       : {}),
     ...(activeTrip && typeof activeTrip.id === "string"

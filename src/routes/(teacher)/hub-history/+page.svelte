@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { account } from '#lib/account.svelte.ts';
+  import { account, staffStudentName } from '#lib/account.svelte.ts';
   import { download } from '#lib/csv.ts';
   import Icon from '#lib/Icon.svelte';
   import { dayKey, time } from '#lib/passes.ts';
   import { hubRuntime } from '#lib/hub-runtime.svelte.ts';
-  import { hubMovementRows, hubMovementRowsToCsv } from '#lib/hub-reporting.ts';
+  import { hubMovementRows, hubVisitSummaryRowsToCsv } from '#lib/hub-reporting.ts';
 
   let query = $state('');
   let from = $state('');
@@ -29,7 +29,9 @@
   });
 
   function exportCsv() {
-    download(`Hub history ${dayKey(new Date())}.csv`, hubMovementRowsToCsv(rows), 'text/csv');
+    const visitIds = new Set(rows.map((row) => row.visitId));
+    const visits = account.hubVisits.filter((visit) => visitIds.has(visit.id));
+    download(`Hub visit summary ${dayKey(new Date())}.csv`, hubVisitSummaryRowsToCsv(visits, staffStudentName), 'text/csv');
   }
 </script>
 
@@ -40,7 +42,7 @@
       <h1>Hub History</h1>
       <p class="muted">A timeline of Hub arrivals, departures, temporary trips, check-ins, and class returns.</p>
     </div>
-    <button class="btn" onclick={exportCsv} disabled={!rows.length}><Icon name="download" size={16} />Download CSV</button>
+    <button class="btn" onclick={exportCsv} disabled={!rows.length}><Icon name="download" size={16} />Download visit summary CSV</button>
   </header>
 
   {#if !hubRuntime.hosted}
@@ -72,7 +74,7 @@
             {#each rows as row (row.id)}
               <tr>
                 <td>{dayKey(row.occurredAt)}<span class="muted small">{time(row.occurredAt)}</span></td>
-                <td><strong>{row.studentName}</strong>{#if row.yearGroup}<span class="muted small">{row.yearGroup}</span>{/if}</td>
+                <td><strong>{staffStudentName(row.studentId, row.studentName)}</strong>{#if row.yearGroup}<span class="muted small">{row.yearGroup}</span>{/if}</td>
                 <td>{row.event}{#if row.detail}<span class="muted small detail">{row.detail}</span>{/if}</td>
                 <td>{row.destination}</td>
                 <td>{row.className || 'Direct Hub arrival'}{#if row.periodName}<span class="muted small">{row.periodName}</span>{/if}</td>

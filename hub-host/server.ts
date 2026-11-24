@@ -29,6 +29,7 @@ import {
   routeBackups,
   routeInvitations,
   routeKiosk,
+  routeHubVisitActions,
   routeMail,
   routePublic,
   routeSessions,
@@ -322,7 +323,8 @@ async function route(
   }
 
   if (await routeBackups(context, url)) return;
-  if (routeMail(context, url)) return;
+  if (await routeHubVisitActions(context, url)) return;
+  if (await routeMail(context, url)) return;
   if (routeInvitations(context, url)) return;
   if (routeSessions(context, url)) return;
   if (await routeAuditState(context, url)) return;

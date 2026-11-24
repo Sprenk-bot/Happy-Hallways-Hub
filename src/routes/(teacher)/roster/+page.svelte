@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { replaceState } from '$app/navigation';
-  import { account, addStudentCategory, classesOf, dismissMerge, dismissRosterMerge, findStudent, mergeStudents, removeStudentCategory, setStudentPins, undoMerge, updateStudentCategory } from '#lib/account.svelte.ts';
+  import { account, addStudentCategory, classesOf, dismissMerge, dismissRosterMerge, findStudent, mergeStudents, removeStudentCategory, setStudentCategories, setStudentPins, undoMerge, updateStudentCategory } from '#lib/account.svelte.ts';
   import Modal from '#lib/Modal.svelte';
   import type { MergeSuggestion } from '#lib/merge.ts';
   import { shortDate } from '#lib/passes.ts';
@@ -42,6 +42,8 @@
   let newCategoryName = $state('');
   let newCategoryColor = $state<DestinationColor>('blue');
   let categoryError = $state('');
+  let selectedStudentIds = $state<string[]>([]);
+  let bulkCategoryId = $state('');
   const categoryColors = Object.keys(destinationColors) as DestinationColor[];
   const isCategoryColor = (value: string): value is DestinationColor =>
     categoryColors.some((color) => color === value);
@@ -127,6 +129,30 @@
     } catch (error) {
       categoryError = error instanceof Error ? error.message : 'The year group could not be removed.';
     }
+  }
+
+  function assignSelected() {
+    categoryError = '';
+    try {
+      setStudentCategories(selectedStudentIds, bulkCategoryId || null);
+      selectedStudentIds = [];
+    } catch (error) {
+      categoryError = error instanceof Error ? error.message : 'The year groups could not be assigned.';
+    }
+  }
+
+  function toggleStudent(studentId: string) {
+    selectedStudentIds = selectedStudentIds.includes(studentId)
+      ? selectedStudentIds.filter((id) => id !== studentId)
+      : [...selectedStudentIds, studentId];
+  }
+
+  function toggleVisibleSelection() {
+    const visibleIds = visibleRows.map((row) => row.student.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedStudentIds.includes(id));
+    selectedStudentIds = allSelected
+      ? selectedStudentIds.filter((id) => !visibleIds.includes(id))
+      : [...new Set([...selectedStudentIds, ...visibleIds])];
   }
 </script>
 
@@ -296,11 +322,21 @@
           </select>
         </label>
       </div>
+      <div class="bulk-year-group">
+        <label class="field">Assign selected students to
+          <select aria-label="Bulk assign year group" bind:value={bulkCategoryId}>
+            <option value="">Unassigned</option>
+            {#each account.studentCategories as category (category.id)}<option value={category.id}>{category.name}</option>{/each}
+          </select>
+        </label>
+        <button class="btn btn-small btn-primary" disabled={!selectedStudentIds.length} onclick={assignSelected}>Apply to {selectedStudentIds.length} selected</button>
+        <button class="btn btn-small btn-quiet" disabled={!selectedStudentIds.length} onclick={() => (selectedStudentIds = [])}>Clear selection</button>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Student</th>
+              <th><input type="checkbox" aria-label="Select all shown students" checked={visibleRows.length > 0 && visibleRows.every((row) => selectedStudentIds.includes(row.student.id))} onchange={toggleVisibleSelection} /></th><th>Student</th>
               <th>Year group</th>
               <th>Classes</th>
               {#if account.studentPins}<th>PIN</th>{/if}
@@ -312,6 +348,7 @@
           <tbody>
             {#each visibleRows as row (row.student.id)}
               <tr>
+                <td><input type="checkbox" aria-label="Select {row.name}" checked={selectedStudentIds.includes(row.student.id)} onchange={() => toggleStudent(row.student.id)} /></td>
                 <td>
                   <strong>{row.name}</strong>
                   {#if row.student.alwaysGo}<span class="badge">Can always go</span>{:else if row.student.exempt}<span class="badge">Exempt</span>{/if}
@@ -338,7 +375,7 @@
           </tbody>
           <tfoot>
             <tr>
-              <td colspan={account.studentPins ? 4 : 3}><strong>{visibleRows.length === rows.length ? 'All students' : `${visibleRows.length} shown`}</strong></td>
+              <td colspan={account.studentPins ? 5 : 4}><strong>{visibleRows.length === rows.length ? 'All students' : `${visibleRows.length} shown`}</strong></td>
               <td class="num"><strong>{totals.week}</strong></td>
               <td class="num"><strong>{totals.minutesWeek}</strong></td>
               <td></td>
@@ -401,7 +438,8 @@
 {/if}
 
 <style>
-
+  .bulk-year-group { display:flex; flex-wrap:wrap; align-items:end; gap:8px; padding:10px 0; }
+  .bulk-year-group .field { min-width:220px; }
 
   tfoot td {
     border-top: 1px solid var(--border);

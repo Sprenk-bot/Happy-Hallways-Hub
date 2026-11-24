@@ -4,6 +4,7 @@
     account,
     activeClassLabel,
     classStudents,
+    currentSchedule,
     cancelHubVisitNotification,
     confirmArrivedBackAtClass,
     createClass,
@@ -22,6 +23,7 @@
     passStatusIcon,
     passStatusText,
     setActiveClass,
+    staffStudentName,
     setDoorLocked,
     stopFollowingSchedule,
     useSchedule,
@@ -55,7 +57,7 @@
   import type { HubVisitCancellationReason } from '#lib/types.ts';
   import { duration, hasRealDuration, isOverdue, now, time } from '#lib/passes.ts';
   import { nextClassPeriod, periodAt, toMinutes } from '#lib/schedule.ts';
-  import { flushHubSaves, hubRuntime } from '#lib/hub-runtime.svelte.ts';
+  import { flushHubSaves, hubRuntime, reloadFromHost } from '#lib/hub-runtime.svelte.ts';
   import { hubMail, loadMailRecipients, sendHubConcern } from '#lib/hub-mail.svelte.ts';
 
   /**
@@ -177,13 +179,13 @@
   const activity = $derived.by(() => {
     const events: Activity[] = [];
     for (const pass of thisClass) {
-      events.push({ id: `${pass.id}-out`, at: pass.outAt, text: `${pass.studentName} left for ${pass.destination}`, pass });
+      events.push({ id: `${pass.id}-out`, at: pass.outAt, text: `${staffStudentName(pass.studentId, pass.studentName)} left for ${pass.destination}`, pass });
       if (pass.inAt && pass.endedBy === 'student') {
         const minutes = hasRealDuration(pass) ? ` after ${duration(pass)} min` : '';
-        events.push({ id: `${pass.id}-in`, at: pass.inAt, text: `${pass.studentName} came back${minutes}` });
+        events.push({ id: `${pass.id}-in`, at: pass.inAt, text: `${staffStudentName(pass.studentId, pass.studentName)} came back${minutes}` });
       }
       if (pass.inAt && pass.endedBy === 'teacher') {
-        events.push({ id: `${pass.id}-in`, at: pass.inAt, text: `You marked ${pass.studentName} back` });
+        events.push({ id: `${pass.id}-in`, at: pass.inAt, text: `You marked ${staffStudentName(pass.studentId, pass.studentName)} back` });
       }
     }
     for (const request of account.deniedRequests) {
@@ -191,7 +193,7 @@
       events.push({
         id: request.id,
         at: request.deniedAt,
-        text: `You said no to ${request.studentName} (${request.destination})`,
+        text: `You said no to ${staffStudentName(request.studentId, request.studentName)} (${request.destination})`,
         denied: true,
       });
     }
@@ -287,6 +289,9 @@
     recipientIds: string[];
   } | null>(null);
   let hubNoticeState = $state<'idle' | 'saving' | 'saved' | 'pending' | 'error'>('idle');
+  let extendingHubTimerId = $state('');
+  let savingHubNoteId = $state('');
+  let hubStaffNoteDrafts = $state<Record<string, string>>({});
   let hubNoticeMessage = $state('');
   let pendingHubSuccessMessage = '';
 
@@ -380,6 +385,7 @@
         destinationId: hubDestinationId,
         classId: cls.id,
         className: cls.name,
+        ...(periodAt(currentSchedule()) ? { periodName: `${periodAt(currentSchedule())!.start}–${periodAt(currentSchedule())!.end}` } : {}),
         ...(concern ? { hasConcern: true } : {}),
       });
       if (concern) {
@@ -497,6 +503,44 @@
       hubNoticeMessage = error instanceof Error
         ? error.message
         : 'The Hub arrival could not be saved.';
+    }
+  }
+
+  async function addHubVisitTime(visitId: string, minutes = 5) {
+    if (extendingHubTimerId || !hubRuntime.hosted || hubRuntime.status !== 'ready') return;
+    extendingHubTimerId = visitId;
+    hubNoticeMessage = '';
+    try {
+      const response = await fetch(`/api/v1/hub-visits/${encodeURIComponent(visitId)}/time`, {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ minutes }),
+      });
+      if (!response.ok) throw new Error('The Host did not add time to this visit.');
+      await reloadFromHost();
+      hubNoticeMessage = `${minutes} minutes added to the Hub timer.`;
+    } catch (problem) {
+      hubNoticeMessage = problem instanceof Error ? problem.message : 'Could not add time to the Hub timer.';
+    } finally {
+      extendingHubTimerId = '';
+    }
+  }
+
+  async function saveHubStaffNote(visitId: string) {
+    if (savingHubNoteId || !hubRuntime.hosted || hubRuntime.status !== 'ready') return;
+    savingHubNoteId = visitId;
+    hubNoticeMessage = '';
+    try {
+      const response = await fetch(`/api/v1/hub-visits/${encodeURIComponent(visitId)}/note`, {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: hubStaffNoteDrafts[visitId] ?? '' }),
+      });
+      if (!response.ok) throw new Error('The Hub Host did not save the note.');
+      await reloadFromHost();
+      hubNoticeMessage = 'Hub staff note saved.';
+    } catch (problem) {
+      hubNoticeMessage = problem instanceof Error ? problem.message : 'The Hub staff note could not be saved.';
+    } finally {
+      savingHubNoteId = '';
     }
   }
 
@@ -690,7 +734,7 @@
                   {#each out as pass (pass.id)}
                     {@const late = isOverdue(pass, at)}
                     <tr>
-                      <td><span class="who"><strong>{pass.studentName}</strong> <PassMarks {pass} compact /></span></td>
+                      <td><span class="who"><strong>{staffStudentName(pass.studentId, pass.studentName)}</strong> <PassMarks {pass} compact /></span></td>
                       <td><span class="destination-chip"><DestinationIcon label={pass.destination} size={24} />{pass.destination}</span></td>
                       <td class="nowrap">{time(pass.outAt)}</td>
                       <td class="nowrap">
@@ -735,12 +779,12 @@
                 {#each each.spots as spot, index (spot.studentId)}
                   <li>
                     <span class="line-position">{index + 1}</span>
-                    <strong>{spot.studentName}</strong>
+                    <strong>{staffStudentName(spot.studentId, spot.studentName)}</strong>
                     <span class="muted small">{each.destination ? '' : `for ${spot.destination}, `}since {time(spot.joinedAt)}</span>
-                    <button class="btn btn-small start-now" aria-label="Start {spot.studentName}'s pass now" onclick={() => startPassFromHome(spot.studentId, spot.destination)}>
+                    <button class="btn btn-small start-now" aria-label="Start {staffStudentName(spot.studentId, spot.studentName)}'s pass now" onclick={() => startPassFromHome(spot.studentId, spot.destination)}>
                       <Icon name="arrow-right" size={14} />Start pass
                     </button>
-                    <button class="btn btn-small btn-quiet remove" aria-label="Take {spot.studentName} out of the line" onclick={() => removeFromLine(spot.studentId)}>
+                    <button class="btn btn-small btn-quiet remove" aria-label="Take {staffStudentName(spot.studentId, spot.studentName)} out of the line" onclick={() => removeFromLine(spot.studentId)}>
                       <Icon name="x" size={14} />
                     </button>
                   </li>
@@ -923,7 +967,16 @@
                       <Icon name="alert-triangle" size={15} />
                       <span class="sr-only">A concern is recorded; private details are in the Mail Centre.</span>
                     {/if}
-                    <strong>{visit.studentName}</strong>
+                    <strong>{staffStudentName(visit.studentId, visit.studentName)}</strong>
+                    {#if visit.arrivedAtHubAt && !visit.arrivedBackAtClassAt}
+                      <details class="hub-staff-note">
+                        <summary>Hub staff note {visit.hubStaffNote ? 'saved' : '(optional)'}</summary>
+                        <label>Note after speaking with the student
+                          <textarea rows="2" maxlength="1000" value={hubStaffNoteDrafts[visit.id] ?? visit.hubStaffNote ?? ''} oninput={(event) => (hubStaffNoteDrafts[visit.id] = event.currentTarget.value)}></textarea>
+                        </label>
+                        <button class="btn btn-small" disabled={savingHubNoteId === visit.id} onclick={() => void saveHubStaffNote(visit.id)}>{savingHubNoteId === visit.id ? 'Saving…' : 'Save note'}</button>
+                      </details>
+                    {/if}
                     {#if needsPeriodTransitionReview(visit)}
                       <span class="muted small">
                         · {visit.className ?? visit.periodName ?? 'Previous class'}
@@ -959,6 +1012,9 @@
                         onclick={() => requestHubMovementCancellation(visit.id, 'did-not-arrive')}
                       >Mark did not arrive</button>
                     {:else if hubVisitStatus(visit) === 'at-hub'}
+                      {#if visit.hubTimerMinutes}
+                        <button class="btn btn-small" disabled={!!extendingHubTimerId} onclick={() => void addHubVisitTime(visit.id, 5)}>{extendingHubTimerId === visit.id ? 'Adding…' : 'Add 5 min'}</button>
+                      {/if}
                       <button
                         class="btn btn-small"
                         disabled={hubNoticeState === 'saving'}
@@ -1116,6 +1172,10 @@
 {/if}
 
 <style>
+  .hub-staff-note { display:grid; gap:6px; margin-top:6px; }
+  .hub-staff-note summary { cursor:pointer; font-size:12px; font-weight:700; }
+  .hub-staff-note label { display:grid; gap:4px; font-size:12px; }
+  .hub-staff-note textarea { box-sizing:border-box; width:min(360px,100%); padding:8px; border:1px solid var(--border-strong); border-radius:6px; font:inherit; }
   .icon-only {
     padding-inline: 8px;
   }

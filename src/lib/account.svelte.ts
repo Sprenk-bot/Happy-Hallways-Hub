@@ -1131,6 +1131,12 @@ export function findStudent(id: string | undefined) {
   return account.roster.find((student) => student.id === id);
 }
 
+/** Staff-only full name. Student-facing kiosks keep their shorter display names. */
+export function staffStudentName(studentId: string, fallback: string) {
+  const student = findStudent(studentId);
+  return student?.lastName ? `${student.firstName} ${student.lastName}` : fallback;
+}
+
 export function addStudentCategory(name: string, color: StudentCategory["color"]) {
   const label = name.trim();
   if (!label) throw new Error("A category name is needed.");
@@ -1191,6 +1197,21 @@ export function setStudentCategory(studentId: string, categoryId: string | null)
   if (categoryId) student.categoryId = categoryId;
   else delete student.categoryId;
   save();
+}
+
+export function setStudentCategories(studentIds: string[], categoryId: string | null) {
+  if (categoryId && !account.studentCategories.some((category) => category.id === categoryId)) {
+    throw new Error("That student category is no longer available.");
+  }
+  const selected = new Set(studentIds);
+  let changed = false;
+  for (const student of account.roster) {
+    if (!selected.has(student.id) || student.categoryId === (categoryId || undefined)) continue;
+    if (categoryId) student.categoryId = categoryId;
+    else delete student.categoryId;
+    changed = true;
+  }
+  if (changed) save();
 }
 
 // ---------------------------------------------------------------------------

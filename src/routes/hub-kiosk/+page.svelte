@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import BrandMark from '#lib/BrandMark.svelte';
+  import { destinationColors, type DestinationColor } from '#lib/destinations.ts';
   import { playHubChime, playHubNotificationChime, prepareHubAudio } from '../../lib/sound';
   import {
     isHubKioskChime,
@@ -14,6 +15,8 @@
   type HubKioskStudent = {
     id: string;
     studentName: string;
+    categoryName?: string;
+    categoryColor?: DestinationColor;
     status:
       | 'in-class'
       | 'on-the-way'
@@ -29,6 +32,10 @@
     promptVersion?: number;
     arrivalPrompts?: HubVisitPrompt[];
     departurePrompts?: HubVisitPrompt[];
+    timerStartedAt?: string;
+    timerMinutes?: number;
+    timerWarningMinutes?: number;
+    overdueCountsUp?: boolean;
   };
 
   type HubKioskDestination = {
@@ -54,6 +61,7 @@
 
   type HubKioskMovement =
     | { action: 'arrive' | 'leave' | 'temporary-return'; visitId: string }
+    | { action: 'prompts'; visitId: string; stage: HubPromptStage }
     | { action: 'direct-arrive'; studentId: string; destinationId: string }
     | { action: 'temporary-start'; visitId: string; destinationId: string };
 
@@ -70,10 +78,14 @@
   });
   let promptOverrides = $state<HubKioskState['promptOverrides']>([]);
   let hasLoadedState = false;
+  let clockNow = $state(Date.now());
+  const warningChimesPlayed = new Set<string>();
   let activationRequired = $state(false);
   let error = $state('');
   let notice = $state('');
   let search = $state('');
+  let categoryFilter = $state('');
+  let studentSort = $state<'out-first' | 'name' | 'year'>('out-first');
   let selectedStudentId = $state('');
   let selectedDestinationId = $state('');
   let workingStudentId = $state('');
@@ -86,11 +98,18 @@
   const selectedDestination = $derived(
     destinations.find((destination) => destination.id === selectedDestinationId) ?? null,
   );
-  const visibleStudents = $derived(
-    students.filter((student) =>
-      student.studentName.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
-    ),
-  );
+  const categories = $derived([...new Set(students.map((student) => student.categoryName).filter((name): name is string => !!name))].sort((a, b) => a.localeCompare(b)));
+  const visibleStudents = $derived.by(() => students
+    .filter((student) => !categoryFilter || student.categoryName === categoryFilter)
+    .filter((student) => student.studentName.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
+    .sort((a, b) => {
+      if (studentSort === 'out-first') {
+        const aOut = a.status !== 'in-class'; const bOut = b.status !== 'in-class';
+        if (aOut !== bOut) return aOut ? -1 : 1;
+      }
+      if (studentSort === 'year') return (a.categoryName ?? '').localeCompare(b.categoryName ?? '') || a.studentName.localeCompare(b.studentName);
+      return a.studentName.localeCompare(b.studentName);
+    }));
   const selectedStudent = $derived(
     students.find((student) => student.id === selectedStudentId) ?? null,
   );
@@ -112,6 +131,17 @@
         throw new Error('The Hub Host could not load kiosk status.');
       }
       const state = result as HubKioskState;
+      const warn = state.students.some((student) => {
+        if (!student.timerStartedAt || !student.timerMinutes || !student.visitId) return false;
+        const remaining = Date.parse(student.timerStartedAt) + student.timerMinutes * 60_000 - Date.now();
+        const warningWindow = (student.timerWarningMinutes ?? 2) * 60_000;
+        const key = `${student.visitId}:warning`;
+        if (remaining >= 0 && remaining <= warningWindow && !warningChimesPlayed.has(key)) {
+          warningChimesPlayed.add(key);
+          return true;
+        }
+        return false;
+      });
       const newClassroomNotification =
         hasLoadedState &&
         !state.soundSettings.muted &&
@@ -137,6 +167,9 @@
       if (newClassroomNotification) {
         playHubNotificationChime(state.soundSettings.volume);
       }
+      if (warn && !state.soundSettings.muted && state.soundSettings.volume > 0) {
+        playHubNotificationChime(state.soundSettings.volume);
+      }
       hasLoadedState = true;
     } catch (problem) {
       connected = false;
@@ -154,6 +187,7 @@
     movement: HubKioskMovement,
     version?: number,
     answers?: Record<string, string | number>,
+    afterMovement?: { stage: HubPromptStage; prompts: HubVisitPrompt[] },
   ) {
     if (!connected || workingStudentId) return;
     if (student.pinRequired && !/^\d{3,6}$/.test(pins[student.id] ?? '')) {
@@ -171,7 +205,7 @@
         cache: 'no-store',
         body: JSON.stringify({
           ...movement,
-          ...(['arrive', 'leave', 'direct-arrive'].includes(movement.action)
+          ...(['arrive', 'leave', 'direct-arrive', 'prompts'].includes(movement.action)
             ? {
                 ...(version !== undefined ? { promptVersion: version } : {}),
                 ...(answers !== undefined ? { promptAnswers: answers } : {}),
@@ -222,6 +256,7 @@
         playHubChime(result.chime, soundSettings.volume);
       }
       const defaultNotice = {
+        prompts: 'Your answers were saved by the Hub Host.',
         arrive: 'Your arrival was saved by the Hub Host.',
         'direct-arrive': 'Your Hub sign-in was saved by the Hub Host.',
         'temporary-start': 'Your Temporary Trip was saved by the Hub Host.',
@@ -233,8 +268,20 @@
         typeof result.confirmationMessage === 'string'
           ? result.confirmationMessage
           : defaultNotice;
-      pins[student.id] = '';
+      if (!afterMovement) pins[student.id] = '';
       await loadState();
+      if (afterMovement && movement.action !== 'prompts') {
+        const currentStudent = students.find((entry) => entry.id === student.id);
+        if (currentStudent?.visitId) {
+          promptMovement = { action: 'prompts', visitId: currentStudent.visitId, stage: afterMovement.stage };
+          promptStage = afterMovement.stage;
+          promptVersion = currentStudent.promptVersion;
+          promptList = afterMovement.prompts;
+          promptAnswers = {};
+        }
+      } else if (movement.action === 'prompts') {
+        pins[student.id] = '';
+      }
     } catch (problem) {
       error =
         problem instanceof Error
@@ -262,6 +309,28 @@
     }
   }
 
+  function timerLabel(student: HubKioskStudent) {
+    if (!student.timerStartedAt || !student.timerMinutes) return '';
+    const total = student.timerMinutes * 60;
+    const elapsed = Math.floor((clockNow - Date.parse(student.timerStartedAt)) / 1000);
+    const remaining = total - elapsed;
+    const overdue = Math.max(0, -remaining);
+    const shown = overdue && student.overdueCountsUp ? overdue : Math.abs(remaining);
+    const minutes = Math.floor(shown / 60);
+    const seconds = shown % 60;
+    return overdue
+      ? `${student.overdueCountsUp ? '+' : '−'}${minutes}:${String(seconds).padStart(2, '0')} overdue`
+      : `${minutes}:${String(seconds).padStart(2, '0')} remaining`;
+  }
+
+  function timerState(student: HubKioskStudent) {
+    if (!student.timerStartedAt || !student.timerMinutes) return '';
+    const remaining = Date.parse(student.timerStartedAt) + student.timerMinutes * 60_000 - clockNow;
+    if (remaining <= 0) return 'overdue';
+    if (remaining <= (student.timerWarningMinutes ?? 2) * 60_000) return 'warning';
+    return 'normal';
+  }
+
   function selectStudent(student: HubKioskStudent) {
     selectedStudentId = student.id;
     selectedDestinationId = '';
@@ -281,13 +350,15 @@
   ) {
     error = '';
     notice = '';
-    if (!prompts.length) {
-      void recordAction(student, movement, version, {});
-      return;
-    }
-    promptMovement = movement;
+    void recordAction(student, movement, version, {}, prompts.length ? { stage, prompts } : undefined);
+  }
+
+  function resumePromptAction(student: HubKioskStudent, stage: HubPromptStage, prompts: HubVisitPrompt[]) {
+    if (!student.visitId || !prompts.length) return;
+    error = '';
+    promptMovement = { action: 'prompts', visitId: student.visitId, stage };
     promptStage = stage;
-    promptVersion = version;
+    promptVersion = student.promptVersion;
     promptList = prompts;
     promptAnswers = {};
   }
@@ -393,10 +464,14 @@
 
   onMount(() => {
     void activateFromLink();
-    const timer = window.setInterval(() => {
+    const clockTimer = window.setInterval(() => (clockNow = Date.now()), 1000);
+    const syncTimer = window.setInterval(() => {
       if (!activationRequired) void loadState();
     }, 2500);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(clockTimer);
+      window.clearInterval(syncTimer);
+    };
   });
 </script>
 
@@ -434,6 +509,10 @@
         Find your name
         <input type="search" bind:value={search} autocomplete="off" />
       </label>
+      <div class="student-filters">
+        <label>Year group <select bind:value={categoryFilter}><option value="">All year groups</option>{#each categories as category (category)}<option value={category}>{category}</option>{/each}</select></label>
+        <label>Sort students <select bind:value={studentSort}><option value="out-first">Students out first</option><option value="name">Name</option><option value="year">Year group, then name</option></select></label>
+      </div>
       {#if visibleStudents.length}
         <div class="student-grid">
           {#each visibleStudents as student (student.id)}
@@ -442,11 +521,16 @@
               class="student-card"
               class:selected={selectedStudentId === student.id}
               data-status={student.status}
+              data-timer={timerState(student)}
+              style:background={student.categoryColor ? destinationColors[student.categoryColor].soft : ''}
+              style:color={student.categoryColor ? destinationColors[student.categoryColor].strong : ''}
               aria-pressed={selectedStudentId === student.id}
               onclick={() => selectStudent(student)}
             >
               <strong>{student.studentName}</strong>
+              {#if student.categoryName}<span>{student.categoryName}</span>{/if}
               <span>{displayStatus(student)}</span>
+              {#if student.timerStartedAt}<strong class="visit-timer" aria-label={`Hub timer ${timerLabel(student)}`}>{timerLabel(student)}</strong>{/if}
             </button>
           {/each}
         </div>
@@ -544,6 +628,9 @@
           >{workingStudentId === selectedStudent.id ? 'Saving…' : 'Sign in at the Hub'}</button>
         {:else if selectedStudent.status === 'at-hub' && selectedStudent.visitId}
           <div class="visit-options">
+            {#if selectedStudent.arrivalPrompts?.length}
+              <button type="button" class="btn" disabled={!connected || !!workingStudentId || !!promptMovement} onclick={() => resumePromptAction(selectedStudent, 'arrival', selectedStudent.arrivalPrompts ?? [])}>Answer arrival questions</button>
+            {/if}
             <section class="option-group">
               <h3>Temporary Destination</h3>
               {#if temporaryDestinations.length}
@@ -595,6 +682,9 @@
           >{workingStudentId === selectedStudent.id ? 'Saving…' : 'I am back at the Hub'}</button>
         {:else if selectedStudent.status === 'left-hub-awaiting-class'}
           <p class="message">Your Hub visit has ended. Ask staff to confirm your return to class.</p>
+          {#if selectedStudent.departurePrompts?.length}
+            <button type="button" class="btn" disabled={!connected || !!workingStudentId || !!promptMovement} onclick={() => resumePromptAction(selectedStudent, 'departure', selectedStudent.departurePrompts ?? [])}>Answer departure questions</button>
+          {/if}
         {:else if selectedStudent.status === 'needs-staff'}
           <p class="message error">Ask Hub staff for help before continuing.</p>
         {/if}
@@ -699,6 +789,10 @@
   .student-card[data-status="at-hub"] { border-color: var(--accent); background: var(--accent-wash); }
   .student-card[data-status="on-temporary-trip"] { border-color: var(--warn); background: var(--warn-wash); }
   .student-card[data-status="left-hub-awaiting-class"], .student-card[data-status="needs-staff"] { border-color: var(--danger); }
+  .student-card[data-timer="warning"] { border: 3px solid #9a5700; background: #fff1cc !important; color: #342000 !important; }
+  .student-card[data-timer="overdue"] { border: 4px solid #8b0000; background: #8b0000 !important; color: #fff !important; }
+  .student-card[data-timer="overdue"] span { color: #fff; }
+  .visit-timer { font-variant-numeric: tabular-nums; }
   .student-card.selected { outline: 3px solid var(--accent); outline-offset: 1px; }
   .student-card:focus-visible, .btn:focus-visible, .destination-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   .action-panel { padding: 18px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); }
