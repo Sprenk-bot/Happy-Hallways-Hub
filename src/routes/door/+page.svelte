@@ -1,4 +1,4 @@
-<script lang="ts">
+bun run<script lang="ts">
   import { goto, replaceState } from '$app/navigation';
   import { page, updated } from '$app/state';
   import { onMount } from 'svelte';
