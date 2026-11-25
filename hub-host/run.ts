@@ -48,9 +48,9 @@ const backupEncryptionKey = backupEncryptionKeyPath
   ? parseBackupEncryptionKey(readFileSync(resolve(backupEncryptionKeyPath)))
   : undefined;
 const allowNamedProfileFallback =
-  process.env.HUB_NAMED_PROFILE_FALLBACK_ENABLED === "true";
+  process.env.HUB_NAMED_PROFILE_FALLBACK_ENABLED="true";
 const namedProfileFallbackApprovedForRealData =
-  process.env.HUB_NAMED_PROFILE_FALLBACK_APPROVED_FOR_REAL_DATA === "true";
+  process.env.HUB_NAMED_PROFILE_FALLBACK_APPROVED_FOR_REAL_DATA="true";
 const entraTenantId = process.env.HUB_ENTRA_TENANT_ID;
 const entraClientId = process.env.HUB_ENTRA_CLIENT_ID;
 const entraRedirectUri = process.env.HUB_ENTRA_REDIRECT_URI;

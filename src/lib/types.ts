@@ -538,6 +538,8 @@ export type Account = {
   dismissedMerges?: string[];
   /** Recent merges, newest last, each with what's needed to undo it. */
   merges?: MergeRecord[];
+  /** How many days to keep Hub mail messages before they are overwritten. Default 5. */
+  mailRetentionDays?: number;
   lastExportedAt?: string;
 };
 

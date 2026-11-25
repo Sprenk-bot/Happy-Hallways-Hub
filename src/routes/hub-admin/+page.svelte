@@ -671,7 +671,7 @@
           <p>Use your school Microsoft account. Your TIC can give you a one-time invitation when this is your first sign-in.</p>
           <label for="entra-invitation">First sign-in invitation <span class="muted">(leave blank if your account is already linked)</span></label>
           <input id="entra-invitation" type="password" autocomplete="off" bind:value={entraInviteToken} />
-          <button class="btn btn-primary" onclick={signInWithEntra} disabled={working}><Icon name="key" size={16} />Continue with Microsoft Entra</button>
+          <button class="btn btn-primary" onclick={signInWithEntra}><Icon name="key" size={16} />Continue with Microsoft Entra</button>
         </div>
       {:else}
         <p class="notice-text">Microsoft Entra is not ready. ICT needs to approve the app registration, MFA policy, and Host certificate settings.</p>
