@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import BrandMark from '#lib/BrandMark.svelte';
   import Icon from '#lib/Icon.svelte';
-  import { account, exportAccount, saveHubKioskSoundSettings, unreadable } from '#lib/account.svelte.ts';
+  import { account, exportAccount, accountSnapshot, saveHubKioskSoundSettings, unreadable } from '#lib/account.svelte.ts';
   import { download } from '#lib/csv.ts';
   import { hasUnsavedHubChanges, importLocalAccountToHost, flushHubSaves, hubRuntime, signOutHubRuntime, startHubRuntime } from '#lib/hub-runtime.svelte.ts';
   import { hubChimeOptions, playHubChime } from '../../lib/sound';
@@ -894,7 +894,6 @@
             </label>
           </div>
           <div class="setting-row">
-            <label></label>
             <button class="btn btn-primary" onclick={setEAPassword} disabled={working}>Set EA Password</button>
           </div>
           {#if eaPasswordSet}
