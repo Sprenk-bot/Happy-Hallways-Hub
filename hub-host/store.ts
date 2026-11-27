@@ -4399,3 +4399,14 @@ function isCanonicalTimestamp(value: string) {
 function hashToken(token: string) {
   return checksumOf(token);
 }
+
+/** 
+ * Verify staff password against stored account password.
+ * Returns true if password matches or no password is required.
+ */
+function verifyStaffPassword(inputPassword: string, storedPassword: string | undefined): boolean {
+  if (!storedPassword) return true; // No password set, allow access
+  if (!inputPassword) return false; // No password entered, deny access
+  // Simple string comparison
+  return inputPassword === storedPassword;
+}

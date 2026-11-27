@@ -116,6 +116,8 @@
   let promptOverrideReason = $state('');
   let confirmLocalImport = $state(false);
   let localImportWorking = $state(false);
+  let eaPassword = $state('');
+  let eaPasswordSet = $state(false);
   const defaultHubSoundSettings: HubKioskSoundSettings = {
     muted: false,
     volume: 70,
@@ -161,6 +163,29 @@
       error = problem instanceof Error
         ? problem.message
         : 'The prompt override was not saved by the Hub Host.';
+    } finally {
+      working = false;
+    }
+  }
+
+  async function setEAPassword() {
+    if (!eaPassword.trim()) return;
+    working = true;
+    try {
+      const stored = await requestJson<StoredState>('/api/v1/state', {
+        method: 'PUT',
+        body: JSON.stringify({
+          expectedRevision: hostState?.revision ?? 0,
+          baseSnapshot: hostState?.snapshot ?? null,
+          snapshot: { ...accountSnapshot(), password: eaPassword }
+        })
+      });
+      hostState = stored;
+      eaPasswordSet = true;
+      eaPassword = '';
+      notice = 'EA Password set. All staff can now sign in using this password.';
+    } catch (problem) {
+      error = problem instanceof Error ? problem.message : 'Could not save EA password.';
     } finally {
       working = false;
     }
@@ -857,6 +882,26 @@
           <p class="muted">Backup health is loading or unavailable.</p>
         {/if}
       </section>
+
+      {#if session.role === 'tic'}
+        <section class="card" aria-labelledby="ea-password-heading">
+          <p class="eyebrow">Staff authentication</p>
+          <h2 id="ea-password-heading">Shared EA Password</h2>
+          <p class="muted small">Set a shared password that all EAs and staff will use for sign-in. This eliminates the need for time-limited invitation codes.</p>
+          <div class="setting-row">
+            <label>Shared EA Password
+              <input type="password" id="ea-password-input" bind:value={eaPassword} style="max-width:200px" />
+            </label>
+          </div>
+          <div class="setting-row">
+            <label></label>
+            <button class="btn btn-primary" onclick={setEAPassword} disabled={working}>Set EA Password</button>
+          </div>
+          {#if eaPasswordSet}
+            <p class="muted small">EA Password configured. All staff can now sign in using this password.</p>
+          {/if}
+        </section>
+      {/if}
 
       <section class="card" aria-labelledby="restore-heading">
         <p class="eyebrow">Recovery</p><h2 id="restore-heading">Restore points</h2>

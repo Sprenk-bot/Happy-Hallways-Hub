@@ -253,6 +253,13 @@ type OlderStudent = {
   exempt?: boolean;
   alwaysGo?: boolean;
   pin?: string;
+/** 
+ * Shared password for sign-in (set by TIC via Hub Admin). 
+ * When set, staff can sign in with this password. 
+ * Differentiated by typing their own name at the kiosk. 
+ * Stored in the Host account snapshot, persists indefinitely.
+ */
+password?: string;
 };
 
 type SavedAccount = Omit<
