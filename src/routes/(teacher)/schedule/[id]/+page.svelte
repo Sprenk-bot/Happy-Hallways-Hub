@@ -57,19 +57,29 @@
     });
   }
 
-  function setPeriodTime(event: Event & { currentTarget: HTMLInputElement }, id: string, field: 'start' | 'end') {
-    const input = event.currentTarget;
-    const period = schedule?.periods.find((each) => each.id === id);
-    if (!schedule || !period) return;
-    const why = periodProblem(schedule, { ...period, [field]: input.value });
-    if (why) {
-      problem = { id, text: why };
-      input.value = period[field];
-      return;
-    }
-    problem = null;
-    change((draft) => Object.assign(draft.periods.find((each) => each.id === id)!, { [field]: input.value }));
+function setPeriodTime(event: Event & { currentTarget: HTMLInputElement }, id: string, field: 'start' | 'end') {
+  const input = event.currentTarget;
+
+  const period = schedule?.periods.find((each) => each.id === id);
+  if (!schedule || !period) return;
+
+  const why = periodProblem(schedule, { ...period, [field]: input.value });
+
+  if (why) {
+    problem = { id, text: why };
+    input.value = period[field];
+    return;
   }
+
+  problem = null;
+
+  change((draft) => {
+    const target = draft.periods.find((each) => each.id === id);
+    if (!target) return;
+
+    target[field] = input.value;
+  });
+}
 
   /** A period's first or last no-pass minutes, from the list. */
   function setPeriodNoPass(input: HTMLInputElement, id: string, edge: 'first' | 'last') {
@@ -161,8 +171,8 @@
                     <option value="">No class</option>
                     {#each classes as cls (cls.id)}<option value={cls.id}>{cls.name}</option>{/each}
                   </select>
-                  <input type="time" aria-label="Starts" value={period.start} onchange={(event) => setPeriodTime(event, period.id, 'start')} />
-                  <input type="time" aria-label="Ends" value={period.end} onchange={(event) => setPeriodTime(event, period.id, 'end')} />
+                  <input type="time" aria-label="Starts" value={period.start} onblur={(event) => setPeriodTime(event, period.id, 'start')} />
+                  <input type="time" aria-label="Ends" value={period.end} onblur={(event) => setPeriodTime(event, period.id, 'end')} />
                   <button
                     class="btn btn-quiet btn-small"
                     aria-label="Remove this period"
@@ -181,7 +191,7 @@
                       max="120"
                       aria-label="First minutes with no passes"
                       value={period.noPass?.first ?? 0}
-                      onchange={(event) => setPeriodNoPass(event.currentTarget, period.id, 'first')}
+                      onblur={(event) => setPeriodNoPass(event.currentTarget, period.id, 'first')}
                     />
                     <span class="muted">min, last</span>
                     <input
@@ -190,7 +200,7 @@
                       max="120"
                       aria-label="Last minutes with no passes"
                       value={period.noPass?.last ?? 0}
-                      onchange={(event) => setPeriodNoPass(event.currentTarget, period.id, 'last')}
+                      onblur={(event) => setPeriodNoPass(event.currentTarget, period.id, 'last')}
                     />
                     <span class="muted">min</span>
                   </div>
@@ -218,8 +228,8 @@
           {#each schedule.noPassTimes as time (time.id)}
             <div class="time-row">
               <span class="small muted">No passes</span>
-              <input type="time" aria-label="No passes from" value={time.start} onchange={(event) => setNoPassTime(event, time.id, 'start')} />
-              <input type="time" aria-label="No passes until" value={time.end} onchange={(event) => setNoPassTime(event, time.id, 'end')} />
+              <input type="time" aria-label="No passes from" value={time.start} onblur={(event) => setNoPassTime(event, time.id, 'start')} />
+              <input type="time" aria-label="No passes until" value={time.end} onblur={(event) => setNoPassTime(event, time.id, 'end')} />
               <button
                 class="btn btn-quiet btn-small"
                 aria-label="Remove this no-pass time"

@@ -236,7 +236,7 @@
     display: grid;
     gap: 12px;
   }
-  .mail-search { display:grid; gap:6px; max-width:560px; font-weight:700; }
+  .mail-search { display:grid; gap:6px; max-width:900px; font-weight:700; }
   .archive-toggle { display:flex; gap:8px; align-items:center; }
   .mail-search input { min-height:42px; padding:8px 12px; border:1px solid var(--border-strong); border-radius:8px; }
   .mail-day, .mail-period { display:grid; gap:10px; }

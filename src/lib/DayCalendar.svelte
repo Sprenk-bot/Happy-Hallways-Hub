@@ -207,25 +207,40 @@
     if (!problem) onsave(draft);
   }
 
-  function setTime(input: HTMLInputElement, block: Block, field: 'start' | 'end') {
-    edit((draft) => {
-      const list: (ClockRange & { id: string })[] = block.kind === 'period' ? draft.periods : draft.noPassTimes;
-      const target = list.find((each) => each.id === block.id);
-      if (!target) return;
-      const next = { ...target, [field]: input.value };
-      const problem =
-        block.kind === 'period'
-          ? periodProblem(draft, next)
-          : !next.start || !next.end || next.start >= next.end
-            ? 'A no-pass time needs to start before it ends.'
-            : null;
-      if (problem) {
-        input.value = target[field];
-        return problem;
-      }
-      target[field] = input.value;
-    });
+function setTime(input: HTMLInputElement, block: Block, field: 'start' | 'end') {
+  let rejected = false;
+
+  edit((draft) => {
+    const list: (ClockRange & { id: string })[] =
+      block.kind === 'period' ? draft.periods : draft.noPassTimes;
+
+    const target = list.find((each) => each.id === block.id);
+    if (!target) return;
+
+    const next = { ...target, [field]: input.value };
+
+    const why =
+      block.kind === 'period'
+        ? periodProblem(draft, next)
+        : !next.start || !next.end || next.start >= next.end
+          ? 'A no-pass time needs to start before it ends.'
+          : null;
+
+    if (why) {
+      rejected = true;
+      return why;
+    }
+
+    target[field] = input.value;
+  });
+
+  if (rejected) {
+    const list = block.kind === 'period' ? schedule.periods : schedule.noPassTimes;
+    const original = list.find((each) => each.id === block.id);
+
+    if (original) input.value = original[field];
   }
+}
 
   function setNoPass(input: HTMLInputElement, periodId: string, edge: 'first' | 'last') {
     const minutes = Math.round(Number(input.value || 0));
@@ -430,11 +445,11 @@
         <div class="times">
           <label class="field">
             Starts
-            <input type="time" value={period.start} onchange={(event) => setTime(event.currentTarget, selected!, 'start')} />
+            <input type="time" value={period.start} onblur={(event) => setTime(event.currentTarget, selected!, 'start')} />
           </label>
           <label class="field">
             Ends
-            <input type="time" value={period.end} onchange={(event) => setTime(event.currentTarget, selected!, 'end')} />
+            <input type="time" value={period.end} onblur={(event) => setTime(event.currentTarget, selected!, 'end')} />
           </label>
         </div>
         {#if period.classId}
@@ -447,7 +462,7 @@
                   min="0"
                   max="120"
                   value={period.noPass?.first ?? 0}
-                  onchange={(event) => setNoPass(event.currentTarget, period.id, 'first')}
+                  onblur={(event) => setNoPass(event.currentTarget, period.id, 'first')}
                 />min
               </span>
             </label>
@@ -459,7 +474,7 @@
                   min="0"
                   max="120"
                   value={period.noPass?.last ?? 0}
-                  onchange={(event) => setNoPass(event.currentTarget, period.id, 'last')}
+                  onblur={(event) => setNoPass(event.currentTarget, period.id, 'last')}
                 />min
               </span>
             </label>
@@ -491,11 +506,11 @@
         <div class="times">
           <label class="field">
             From
-            <input type="time" value={time.start} onchange={(event) => setTime(event.currentTarget, selected!, 'start')} />
+            <input type="time" value={time.start} onblur={(event) => setTime(event.currentTarget, selected!, 'start')} />
           </label>
           <label class="field">
             Until
-            <input type="time" value={time.end} onchange={(event) => setTime(event.currentTarget, selected!, 'end')} />
+            <input type="time" value={time.end} onblur={(event) => setTime(event.currentTarget, selected!, 'end')} />
           </label>
         </div>
         {#if cardProblem}<p class="form-error" role="alert">{cardProblem}</p>{/if}

@@ -222,7 +222,7 @@
       <ul class="sees">
         <li><Icon name="check" size={16} />Each student's first name and a few letters, to tap</li>
         <li><Icon name="check" size={16} />Where they can go, and who's waiting in line</li>
-        <li class="never"><Icon name="x" size={16} />Never full names, history, or anything you've noted</li>
+        <li class="never"><Icon name="x" size={16} />Names, history, or anything you've noted</li>
       </ul>
     </aside>
   </div>
