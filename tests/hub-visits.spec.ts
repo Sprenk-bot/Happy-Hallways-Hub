@@ -141,7 +141,7 @@ test("upgrades version-three accounts without changing classroom passes", async 
 }) => {
   await seedVersionThreeAccount(page);
   const saved = await page.evaluate(async () => {
-    const m = await import("/src/lib/account.svelte.ts");
+    const m = await import("#lib/account.svelte.ts");
     m.setPin("9753");
     return JSON.parse(localStorage.getItem("hallway.account.v2")!);
   });
@@ -375,13 +375,82 @@ test("Hub Host mode saves only the warning flag in shared state and delivers the
   let state: {
     revision: number;
     savedAt: string;
-    visits: {
-      id: string;
-      studentName: string;
-      destinationLabel: string;
-      status: "on-the-way" | "at-hub";
-      pinRequired: boolean;
-    }[];
+    snapshot: {
+      version: number;
+      roster: Array<{
+        id: string;
+        firstName: string;
+        lastName: string;
+        categoryId: string;
+      }>;
+      studentCategories: Array<{
+        id: string;
+        name: string;
+        color: string;
+      }>;
+      destinations: Array<{
+        id: string;
+        label: string;
+        minutes: number | null;
+        color: string;
+        icon: string;
+        limit: number | null;
+        informHubAvailable: boolean;
+      }>;
+      classes: Array<{
+        id: string;
+        name: string;
+        createdAt: string;
+        members: Array<{
+          studentId: string;
+          lastPrefix: string;
+          status: string;
+        }>;
+      }>;
+      activeClass: {
+        id: string;
+        changedAt: string;
+      };
+      passes: unknown[];
+      hubVisits: Array<{
+        id: string;
+        studentId: string;
+        studentName: string;
+        destinationLabel: string;
+        classId: string;
+        className: string;
+        source: string;
+        notifiedBy: {
+          staffId: string;
+          displayName: string;
+          role: string;
+        };
+        hasConcern?: boolean;
+        arrivedAtHubAt?: string;
+        leftHubAt?: string;
+        arrivedBackAtClassAt?: string;
+        temporaryTrips?: Array<{
+          destinationLabel: string;
+          startedAt: string;
+          returnedAt: string;
+          startedBy: { type: string };
+          returnedBy: { type: string };
+        }>;
+        promptResponses?: Array<{
+          promptId: string;
+          promptVersion: number;
+          destinationId: string;
+          stage: "arrival" | "departure";
+          question: string;
+          responseType: "written" | "rating";
+          required: boolean;
+          answer?: string;
+          answeredAt?: string;
+        }>;
+        cancellationReason?: string;
+        cancelledAt?: string;
+      }>;
+    };
   } = {
     revision: 1,
     snapshot: {
@@ -732,7 +801,7 @@ test("class staff can confirm a student back after the Hub visit", async ({
   await installHubAudioSpy(page);
   await seedVersionThreeAccount(page);
   await page.evaluate(async () => {
-    const m = await import("/src/lib/account.svelte.ts");
+    const m = await import("#lib/account.svelte.ts");
     const visitId = m.notifyHubVisit({
       studentId: "maya",
       destinationId: "wellbeing",
@@ -765,7 +834,7 @@ test("keeps Hub movement timestamps separate and nests one active Temporary Trip
   await seedVersionThreeAccount(page);
   const result = await page.evaluate(
     async (times) => {
-      const m = await import("/src/lib/account.svelte.ts");
+      const m = await import("#lib/account.svelte.ts");
       const safeError = (action: () => void) => {
         try {
           action();
@@ -783,7 +852,7 @@ test("keeps Hub movement timestamps separate and nests one active Temporary Trip
         },
         times.notifiedAt,
       );
-      const visit = m.account.hubVisits.find((each) => each.id === visitId)!;
+      const visit = m.account.hubVisits.find((each: { id: string }) => each.id === visitId)!;
       const statuses = [m.hubVisitStatus(visit)];
       const duplicateVisitError = safeError(() =>
         m.startHubVisit(
@@ -831,7 +900,7 @@ test("keeps Hub movement timestamps separate and nests one active Temporary Trip
         { studentId: "sam", destinationId: "check-in" },
         times.arrivedAt,
       );
-      const direct = m.account.hubVisits.find((each) => each.id === directId)!;
+      const direct = m.account.hubVisits.find((each: { id: string }) => each.id === directId)!;
       return JSON.parse(
         JSON.stringify({
           visit,
